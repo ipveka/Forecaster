@@ -89,6 +89,7 @@ The `requirements.txt` file lists necessary libraries, simplifying setup. Instal
 
 ```bash
 pip install -r requirements.txt
+```
 
 ## How to Use
 
@@ -105,3 +106,4 @@ from utils.CreateBaselines import CreateBaselines
 from utils.Forecaster import Forecaster
 from utils.Evaluator import Evaluator
 from utils.Auxiliar import *
+```
