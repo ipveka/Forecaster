@@ -100,10 +100,10 @@ To utilize the **LightGBM-Forecaster** project, you'll need to import the releva
 You can import the necessary classes as follows:
 
 ```python
-from utils.DataPreparation import DataPreparation
-from utils.FeatureEngineering import FeatureEngineering
-from utils.CreateBaselines import CreateBaselines
-from utils.Forecaster import Forecaster
-from utils.Evaluator import Evaluator
-from utils.Auxiliar import *
+from utils.data_preparation import DataPreparation
+from utils.feature_engineering import FeatureEngineering
+from utils.create_baselines import CreateBaselines
+from utils.forecaster import Forecaster
+from utils.evaluator import Evaluator
+from utils.auxiliar import *
 ```
