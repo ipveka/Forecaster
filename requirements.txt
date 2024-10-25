@@ -1,0 +1,14 @@
+# General libraries
+pandas
+numpy
+lightgbm
+torch
+
+# Plotting
+matplotlib
+
+# Scikit-learn
+scikit-learn
+
+# Other
+google
