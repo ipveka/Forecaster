@@ -9,7 +9,7 @@ Created initially for the [Forecasting competition VN1 Forecasting](https://www.
 
 ## 🌟 Highlights
 
-The `LightGBMForecaster` class offers key features to boost accuracy and efficiency in forecasting:
+The `LightGBM-Forecaster` project offers several classes that help create features to boost accuracy and efficiency in forecasting:
 
 - **Backtesting Capabilities** 🧭: Simulates real-world model performance by evaluating it over time.
   
