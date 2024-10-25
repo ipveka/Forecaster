@@ -7,7 +7,7 @@ Created initially for the [Forecasting competition VN1 Forecasting](https://www.
 ---
 
 
-## ⚡🌟 Highlights
+## 🌟 Highlights
 
 The `LightGBMForecaster` class offers key features to boost accuracy and efficiency in forecasting:
 
