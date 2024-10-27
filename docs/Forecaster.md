@@ -80,6 +80,7 @@ This class provides a structured approach to preparing time series data, selecti
   - `outlier_column` (str): Column used to identify outliers.
   - `lower_quantile` (float): Lower quantile for outlier removal.
   - `upper_quantile` (float): Upper quantile for outlier removal.
+  - `ts_decomposition` (bool): If True, remove outliers from the dataset using ts decomposition
   - `baseline_col` (str): Column for baseline comparison.
   - `use_guardrail` (bool): If True, apply guardrail limits to predictions.
   - `guardrail_limit` (float): Limit value for guardrail adjustments.

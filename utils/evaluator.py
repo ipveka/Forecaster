@@ -40,8 +40,8 @@ from math import ceil
 import torch
 
 # Evaluator class
-
 class Evaluator:
+    # Init
     def __init__(self, df, actuals_col, baseline_col, preds_cols):
         """
         Initialize the Evaluator with the dataframe that contains the data.
@@ -56,6 +56,7 @@ class Evaluator:
         self.preds_cols = preds_cols
         self.actuals_col = actuals_col
 
+    # Filter test
     def _filter_test_data(self):
         """
         Filters the dataframe to include only the test samples and non-zero actuals.
@@ -64,6 +65,7 @@ class Evaluator:
         """
         return self.df[(self.df['sample'] == 'test') & (self.df[self.actuals_col] != 0)]
 
+    # Remove nan
     def _remove_nan(self, actuals, predictions):
         """
         Remove NaN values from both actuals and predictions.
@@ -75,6 +77,7 @@ class Evaluator:
         mask = ~np.isnan(actuals) & ~np.isnan(predictions)
         return actuals[mask], predictions[mask]
 
+    # Calculate RMSE
     def calculate_rmse(self, actuals, predictions):
         """
         Calculate Root Mean Square Error (RMSE).
@@ -86,6 +89,7 @@ class Evaluator:
         actuals, predictions = self._remove_nan(actuals, predictions)
         return np.sqrt(mean_squared_error(actuals, predictions))
 
+    # Calculate MAPE
     def calculate_mape(self, actuals, predictions):
         """
         Calculate Mean Absolute Percentage Error (MAPE).
@@ -97,6 +101,7 @@ class Evaluator:
         actuals, predictions = self._remove_nan(actuals, predictions)
         return np.mean(np.abs((actuals - predictions) / actuals)) * 100
 
+    # Calculate WMAPE
     def calculate_wmape(self, actuals, predictions):
         """
         Calculate Weighted Mean Absolute Percentage Error (WMAPE).
@@ -108,6 +113,7 @@ class Evaluator:
         actuals, predictions = self._remove_nan(actuals, predictions)
         return np.sum(np.abs(actuals - predictions)) / np.sum(actuals) * 100
 
+    # Calculate MAE
     def calculate_mae(self, actuals, predictions):
         """
         Calculate Mean Absolute Error (MAE).
@@ -119,6 +125,7 @@ class Evaluator:
         actuals, predictions = self._remove_nan(actuals, predictions)
         return np.mean(np.abs(actuals - predictions))
 
+    # Calculate custom metric
     def calculate_custom_metric(self, actuals, predictions):
         """
         Calculate the custom metric based on absolute error and overall error.
@@ -140,6 +147,7 @@ class Evaluator:
 
         return score * 100
 
+    # Evaluate
     def evaluate(self):
         """
         Evaluate RMSE, MAE, MAPE, WMAPE, and custom metric for baseline and all prediction models.
@@ -185,6 +193,7 @@ class Evaluator:
 
         return metrics
 
+    # Create metrics table
     def create_metric_table(self):
         """
         Create a DataFrame for the evaluation metrics, with values rounded to 2 decimal places.
@@ -200,3 +209,77 @@ class Evaluator:
         metric_table = metric_table.round(2)
 
         return metric_table
+    
+    # Calculate metrics
+    def _calculate_metric(self, metric_name, actuals, predictions):
+        """
+        Helper function to calculate the specified metric.
+
+        :param metric_name: The name of the metric to calculate
+        :param actuals: The actual values
+        :param predictions: The predicted values
+        :return: The calculated metric value
+        """
+        if metric_name == 'RMSE':
+            return self.calculate_rmse(actuals, predictions)
+        elif metric_name == 'MAE':
+            return self.calculate_mae(actuals, predictions)
+        elif metric_name == 'MAPE':
+            return self.calculate_mape(actuals, predictions)
+        elif metric_name == 'WMAPE':
+            return self.calculate_wmape(actuals, predictions)
+        elif metric_name == 'Custom Metric':
+            return self.calculate_custom_metric(actuals, predictions)
+        else:
+            raise ValueError(f"Unknown metric: {metric_name}")
+
+    # Calculate grouped metrics
+    def calculate_grouped_metric(self, metric_name, group_col):
+        """
+        Calculate the specified metric grouped by the specified column,
+        including baseline and all prediction models.
+
+        :param metric_name: The name of the metric to calculate (e.g., 'RMSE', 'MAE', etc.)
+        :param group_col: The column name to group by (e.g., 'fcst_lag')
+        :return: A pandas DataFrame summarizing the metric for each prediction column and baseline by group_col
+        """
+        # Filter test data
+        test_data = self._filter_test_data()
+        actuals = test_data[self.actuals_col].values
+
+        # Initialize a list to hold the metric values
+        metric_values = []
+
+        # Group the data by the specified column
+        grouped = test_data.groupby(group_col)
+
+        # Calculate metrics for each group
+        for group_value, group_data in grouped:
+            # Get actuals for the current group
+            group_actuals = group_data[self.actuals_col].values
+
+            # Prepare a row for the current group
+            current_row = {}
+
+            # Calculate baseline metrics
+            baseline_predictions = group_data[self.baseline_col].values
+            current_row['Baseline'] = self._calculate_metric(metric_name, group_actuals, baseline_predictions)
+
+            # Calculate metrics for each prediction column
+            for pred_col in self.preds_cols:
+                predictions = group_data[pred_col].values
+                current_row[pred_col] = self._calculate_metric(metric_name, group_actuals, predictions)
+
+            # Append the current row of metrics to the list
+            metric_values.append(current_row)
+
+        # Create a DataFrame from the metric values list
+        result_df = pd.DataFrame(metric_values, index=grouped.groups.keys())
+
+        # Set the index name to group_col
+        result_df.index.name = group_col
+
+        # Transpose to have models as rows and fcst_lag as columns
+        result_df = result_df.transpose()
+
+        return result_df

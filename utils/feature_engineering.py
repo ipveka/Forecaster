@@ -12,15 +12,15 @@ from lightgbm import LGBMRegressor
 from sklearn.preprocessing import LabelEncoder
 
 # Feature engineering class
-
 class FeatureEngineering:
+    # Init
     def __init__(self):
         pass
 
     # Prepare data
     def run_feature_engineering(self, df, group_cols, date_col, target, horizon, freq,
-                                window_sizes=(4, 13), lags=(4, 13), n_clusters=10,
-                                train_weight_type='linear'):
+                            window_sizes=(4, 13), lags=(4, 13), n_clusters=10,
+                            train_weight_type='linear'):
         """
         Main function to prepare the data by calling all internal functions in order.
 
@@ -39,46 +39,68 @@ class FeatureEngineering:
         Returns:
         pd.DataFrame: Prepared DataFrame
         """
+        # Start function
+        print("Starting feature engineering...")
 
-        # Find signal and categorical columns
-        signal_cols = [col for col in df.select_dtypes(include=['float64']).columns if col != target]
+        # Find categorical columns
+        signal_cols = [col for col in df.select_dtypes(include=['float64']).columns]
+        print(f"Identified signal columns: {signal_cols}")
 
         # Get categorical columns for encoding
         categorical_columns = df.select_dtypes(include='object').columns.tolist()
         categorical_columns = [col for col in categorical_columns if col != 'sample']
+        print(f"Identified categorical columns for encoding: {categorical_columns}")
 
         # Create encoded features
         df = self.create_encoded_features(df, categorical_columns)
+        print("Encoded categorical features.")
 
         # Add date features
         df = self.create_date_features(df, date_col, freq)
+        print("Added date features.")
 
         # Add periods feature
-        df = self.create_periods_feature(df, target)
+        df = self.create_periods_feature(df, group_cols, date_col, target)
+        print("Added periods feature.")
+
+        # Find numeric columns
+        signal_cols = [col for col in df.select_dtypes(include=['float64']).columns if "feature_periods" not in col]
+        print(f"Identified signal columns: {signal_cols}")
 
         # Add MA features
         df = self.create_ma_features(df, group_cols, signal_cols, window_sizes)
+        print("Added moving average features.")
 
         # Add moving stats
         df = self.create_moving_stats(df, group_cols, signal_cols, window_sizes)
+        print("Added moving statistics.")
 
         # Add lag features if any feature columns are found
-        signal_cols = [col for col in df.select_dtypes(include=['float64']).columns if col != target]
         df = self.create_lag_features(df, group_cols, date_col, signal_cols, lags, horizon)
+        print("Added lag features.")
 
         # Add coefficient of variance for target
         df = self.create_cov(df, group_cols, target)
+        print("Added coefficient of variance feature for the target variable.")
 
         # Add quantile clusters
         df = self.create_quantile_clusters(df, group_cols, target, n_clusters)
+        print("Added quantile clusters.")
 
         # Add history clusters
         df = self.create_history_clusters(df, group_cols, target, n_clusters)
+        print("Added history clusters.")
 
         # Add train weights
-        df = self.create_train_weights(df, group_cols, train_weight_type)
+        df = self.create_train_weights(df, group_cols)
+        print("Added train weights based on the specified weighting type.")
 
-        # Return
+        # Add forecast lag numbers
+        df = self.create_fcst_lag_number(df, group_cols, date_col)
+        print("Added forecast lag numbers.")
+
+        # Final message and return
+        print("Feature engineering completed. Returning prepared DataFrame.")
         return df
 
     # Create encoded features
@@ -122,9 +144,14 @@ class FeatureEngineering:
             - 'feature_periods_expanding': expanded version of the periods count,
             - 'feature_periods_sqrt': square root of the periods count.
         """
-
-        # Make a copy of the dataframe to avoid modifying the original
+        # Copy the input DataFrame
         df_copy = df.copy()
+
+        # Ensure group_columns is a list
+        if isinstance(group_columns, str):
+            group_columns = [group_columns]
+        elif not isinstance(group_columns, list):
+            raise ValueError("group_columns must be a list or a string.")
 
         # Ensure the date_column is in datetime format
         df_copy[date_column] = pd.to_datetime(df_copy[date_column])
@@ -135,8 +162,8 @@ class FeatureEngineering:
         # Create a mask to indicate rows where the signal_col is greater than 0
         df_copy['signal_above_zero'] = df_copy[target_col] > 0
 
-        # Group by the group_columns and create a cumulative sum of the signal_above_zero mask to
-        # start counting periods only when the signal_col is greater than 0
+        # Group by the group_columns and create a cumulative sum of the signal_above_zero mask
+        # Start counting periods only when the signal_col is greater than 0
         df_copy['first_nonzero_signal'] = df_copy.groupby(group_columns)['signal_above_zero'].cumsum() > 0
 
         # Count periods only where the signal has been greater than zero
@@ -163,7 +190,7 @@ class FeatureEngineering:
         return df_copy
 
     # Create date features
-    def create_date_features(self, df: pd.DataFrame, date_col: str, freq: str) -> pd.DataFrame:
+    def create_date_features(self, df, date_col, freq):
         """
         Create date-related features from the date column, including weeks and months until the next end of quarter and end of year.
         All generated features are prefixed with 'feature_' for consistency.
@@ -176,7 +203,7 @@ class FeatureEngineering:
         Returns:
             pd.DataFrame: DataFrame with new feature columns, all prefixed with 'feature_'.
         """
-        # Create a copy to avoid modifying the original DataFrame
+        # Copy the input DataFrame
         df = df.copy()
 
         # Ensure the date column is in datetime format
@@ -238,9 +265,20 @@ class FeatureEngineering:
         Returns:
         - pandas DataFrame with new columns for moving averages for each window size
         """
-
-        # Make a copy of the dataframe to avoid modifying the original
+        # Copy the input DataFrame
         df_copy = df.copy()
+
+        # Ensure group_columns is a list
+        if isinstance(group_columns, str):
+            group_columns = [group_columns]
+        elif not isinstance(group_columns, list):
+            raise ValueError("group_columns must be a list or a string.")
+        
+        # Ensure signal_columns is a list
+        if isinstance(signal_columns, str):
+            group_columns = [signal_columns]
+        elif not isinstance(signal_columns, list):
+            raise ValueError("signal_columns must be a list or a string.")
 
         # Loop through each signal column
         for signal_column in signal_columns:
@@ -269,9 +307,20 @@ class FeatureEngineering:
         Returns:
         - pandas DataFrame with new columns for moving minimum and maximum for each window size
         """
-
-        # Make a copy of the dataframe to avoid modifying the original
+        # Copy the input DataFrame
         df_copy = df.copy()
+
+        # Ensure group_columns is a list
+        if isinstance(group_columns, str):
+            group_columns = [group_columns]
+        elif not isinstance(group_columns, list):
+            raise ValueError("group_columns must be a list or a string.")
+        
+        # Ensure signal_columns is a list
+        if isinstance(signal_columns, str):
+            group_columns = [signal_columns]
+        elif not isinstance(signal_columns, list):
+            raise ValueError("signal_columns must be a list or a string.")
 
         # Loop through each signal column
         for signal_column in signal_columns:
@@ -308,6 +357,18 @@ class FeatureEngineering:
         Returns:
         pd.DataFrame: DataFrame with additional columns for lag features.
         """
+        # Ensure group_columns is a list
+        if isinstance(group_columns, str):
+            group_columns = [group_columns]
+        elif not isinstance(group_columns, list):
+            raise ValueError("group_columns must be a list or a string.")
+        
+        # Ensure signal_columns is a list
+        if isinstance(signal_columns, str):
+            group_columns = [signal_columns]
+        elif not isinstance(signal_columns, list):
+            raise ValueError("signal_columns must be a list or a string.")
+        
         # Ensure the date column is in datetime format
         df[date_col] = pd.to_datetime(df[date_col])
 
@@ -354,7 +415,8 @@ class FeatureEngineering:
         Parameters:
         df (pd.DataFrame): Input DataFrame containing the group and value columns.
         group_columns (list): List of columns to group by (e.g., ['client', 'warehouse', 'product']).
-        value_columns (list): List of value columns for which to calculate CV (e.g., ['sales', 'price']).
+        value_columns (list or str): List of value columns for which to calculate CV (e.g., ['sales', 'price']).
+                                    Can also be a single column name as a string (e.g., 'sales').
 
         Returns:
         pd.DataFrame: DataFrame with additional CV columns for each value column, joined back to the full DataFrame.
@@ -362,20 +424,43 @@ class FeatureEngineering:
         # Copy the input DataFrame
         result = df.copy()
 
+        # Ensure group_columns is a list
+        if isinstance(group_columns, str):
+            group_columns = [group_columns]
+        elif not isinstance(group_columns, list):
+            raise ValueError("group_columns must be a list or a string.")
+
+        # Ensure value_columns is a list
+        if isinstance(value_columns, str):
+            value_columns = [value_columns]
+        elif not isinstance(value_columns, list):
+            raise ValueError("value_columns must be a list or a string.")
+
         # Filter only for rows where sample is 'train'
         train_data = df[df['sample'] == 'train']
 
         for value_column in value_columns:
-            # Exclude zero values and calculate the mean and standard deviation for each group using the 'train' sample only
-            group_stats = train_data.groupby(group_columns)[value_column].agg(['mean', 'std']).reset_index()
+            if value_column not in df.columns:
+                print(f"Warning: Column '{value_column}' not found in the DataFrame.")
+                continue
 
-            # Calculate the coefficient of variation (CV = std / mean), handle cases where mean = 0 to avoid division by zero
+            # Exclude zero values and calculate the mean and standard deviation for each group
+            group_stats = (
+                train_data[train_data[value_column] != 0]
+                .groupby(group_columns)[value_column]
+                .agg(['mean', 'std'])
+                .reset_index()
+            )
+
+            # Calculate the coefficient of variation (CV = std / mean)
             cov_column = f'feature_{value_column}_cov'
+
+            # Handle cases where mean = 0 to avoid division by zero
             group_stats[cov_column] = group_stats['std'] / group_stats['mean']
-            group_stats[cov_column] = group_stats[cov_column].fillna(0)
+            group_stats[cov_column] = group_stats[cov_column].fillna(0)  # Fill NaN results with 0
 
             # Drop unnecessary columns 'mean' and 'std' after calculation
-            group_stats = group_stats.drop(columns=['mean', 'std'])
+            group_stats = group_stats.drop(columns=['mean', 'std'], errors='ignore')  # Avoid KeyErrors
 
             # Merge the CV back into the original DataFrame (result), keeping all original rows
             result = result.merge(group_stats[group_columns + [cov_column]], on=group_columns, how='left')
@@ -396,8 +481,14 @@ class FeatureEngineering:
         Returns:
         pd.DataFrame: DataFrame with new columns for each combination's distinct counts.
         """
-        # Make a copy of the input DataFrame
+        # Copy the input DataFrame
         result = df.copy()
+
+        # Ensure group_columns is a list
+        if isinstance(group_columns, str):
+            group_columns = [group_columns]
+        elif not isinstance(group_columns, list):
+            raise ValueError("group_columns must be a list or a string.")
 
         # Loop by group columns
         for group_col in group_columns:
@@ -440,6 +531,18 @@ class FeatureEngineering:
         # Copy the input DataFrame
         result = df.copy()
 
+        # Ensure group_columns is a list
+        if isinstance(group_columns, str):
+            group_columns = [group_columns]
+        elif not isinstance(group_columns, list):
+            raise ValueError("group_columns must be a list or a string.")
+        
+        # Ensure value_columns is a list
+        if isinstance(value_columns, str):
+            value_columns = [value_columns]
+        elif not isinstance(value_columns, list):
+            raise ValueError("value_columns must be a list or a string.")
+
         # Filter only for rows where sample is 'train'
         train_data = df[df['sample'] == 'train']
 
@@ -479,6 +582,18 @@ class FeatureEngineering:
         # Copy the input DataFrame
         result = df.copy()
 
+        # Ensure group_columns is a list
+        if isinstance(group_columns, str):
+            group_columns = [group_columns]
+        elif not isinstance(group_columns, list):
+            raise ValueError("group_columns must be a list or a string.")
+        
+        # Ensure value_columns is a list
+        if isinstance(value_columns, str):
+            value_columns = [value_columns]
+        elif not isinstance(value_columns, list):
+            raise ValueError("value_columns must be a list or a string.")
+
         # Filter only for rows where sample is 'train'
         train_data = df[df['sample'] == 'train']
 
@@ -487,7 +602,7 @@ class FeatureEngineering:
             max_values = train_data.groupby(group_columns)[value_column].max().reset_index()
 
             # Create quantile clusters based on the max values
-            cluster_column = f'{value_column}_history_cluster'
+            cluster_column = f'feature_{value_column}_history_cluster'
 
             # Use `pd.qcut` to create quantiles and convert them to integers
             max_values[cluster_column] = pd.qcut(max_values[value_column], q=n_groups, duplicates='drop', labels=False) + 1
@@ -519,6 +634,18 @@ class FeatureEngineering:
         """
         # Copy the input DataFrame
         result = df.copy()
+
+        # Ensure group_columns is a list
+        if isinstance(group_columns, str):
+            group_columns = [group_columns]
+        elif not isinstance(group_columns, list):
+            raise ValueError("group_columns must be a list or a string.")
+        
+        # Ensure value_columns is a list
+        if isinstance(value_columns, str):
+            value_columns = [value_columns]
+        elif not isinstance(value_columns, list):
+            raise ValueError("value_columns must be a list or a string.")
 
         # Function to calculate intermittence for a given column
         def calculate_intermittence(group, column):
@@ -555,35 +682,44 @@ class FeatureEngineering:
         return result
 
     # Create train weights
-    def create_train_weights(self, df, group_cols, feature_periods_col='feature_periods', train_weight_type='LINEAR'):
+    def create_train_weights(self, df, group_columns, feature_periods_col='feature_periods', train_weight_type='linear'):
         """
         Creates a 'weight' column for each group in a DataFrame, giving more weight to recent observations.
         Weights are calculated only for rows where 'sample' is 'train'.
 
         Parameters:
         df (pd.DataFrame): The input DataFrame containing the data.
-        group_cols (list): List of columns to group by.
+        group_columns (list): List of columns to group by.
         feature_periods_col (str): Column name for the feature periods (e.g., weeks since inception).
-        train_weight_type (str): The type of weighting to use ('exponential' or 'linear'). Defaults to 'exponential'.
+        train_weight_type (str): The type of weighting to use ('exponential' or 'linear'). Defaults to 'linear'.
 
         Returns:
         pd.DataFrame: A copy of the input DataFrame with an added 'weight' column for 'train' samples.
-        """
+        """ 
+        # Copy the input DataFrame
+        df_copy = df.copy()
+
+        # Ensure group_columns is a list
+        if isinstance(group_columns, str):
+            group_columns = [group_columns]
+        elif not isinstance(group_columns, list):
+            raise ValueError("group_columns must be a list or a string.")
+
+        # Function to compute weights
         def compute_weights(group):
             # Calculate the maximum period within the group
             max_period = group[feature_periods_col].max()
 
             if train_weight_type == 'exponential':
                 # Exponential weights: more weight to recent periods
-                return np.exp((group[feature_periods_col] - max_period) / max_period)
+                weights = np.exp((group[feature_periods_col] - max_period) / max_period)
             elif train_weight_type == 'linear':
                 # Linear weights: weight proportional to feature_periods
-                return group[feature_periods_col] / max_period
+                weights = group[feature_periods_col] / max_period
             else:
                 raise ValueError("Invalid train_weight_type. Choose either 'exponential' or 'linear'.")
-
-        # Create a copy of the input DataFrame to avoid modifying the original
-        df_copy = df.copy()
+            
+            return weights
 
         # Create a boolean mask for rows where 'sample' is 'train'
         mask = df_copy['sample'] == 'train'
@@ -591,8 +727,56 @@ class FeatureEngineering:
         # Calculate and assign weights for 'train' samples
         df_copy.loc[mask, 'train_weight'] = (
             df_copy[mask]
-            .groupby(group_cols)[feature_periods_col]
-            .transform(lambda x: compute_weights(pd.DataFrame({feature_periods_col: x})))
+            .groupby(group_columns, group_keys=False)
+            .apply(compute_weights)
         )
 
         return df_copy
+    
+    # Create forecast lag number
+    def create_fcst_lag_number(self, df, group_columns, date_col='date', sample_col='sample', target_sample='test'):
+        """
+        Adds a column `fcst_lag` to the DataFrame that counts rows from 1 for each occurrence of `sample = target_sample`
+        within groups defined by `group_columns`. The count starts from the first occurrence of `sample = target_sample` in
+        each group, and all prior rows are set to NaN.
+
+        Parameters:
+        -----------
+        df : pd.DataFrame
+            The DataFrame containing data to process.
+        group_columns : list
+            Columns to group by, e.g., ['client', 'warehouse', 'product', 'cutoff'].
+        date_col : str, optional
+            Column to order rows by within each group. Default is 'date'.
+        sample_col : str, optional
+            Column that identifies the target sample, e.g., 'sample'.
+        target_sample : str, optional
+            Value within `sample_col` to start counting from. Default is 'test'.
+
+        Returns:
+        --------
+        pd.DataFrame
+            The DataFrame with an added `fcst_lag` column.
+        """
+        # Ensure group_columns is a list
+        if isinstance(group_columns, str):
+            group_columns = [group_columns]
+        elif not isinstance(group_columns, list):
+            raise ValueError("group_columns must be a list or a string.")
+
+        # Sort DataFrame - calling sort_values() directly on the DataFrame
+        df = df.sort_values(by=group_columns + [date_col]).copy()
+        
+        # Auxiliar fcst lag function
+        def apply_fcst_lag(group):
+            start_index = group.index[group[sample_col] == target_sample]
+            if len(start_index) == 0:
+                group['fcst_lag'] = float('nan')
+            else:
+                first_test_index = start_index[0]
+                group.loc[first_test_index:, 'fcst_lag'] = range(1, len(group.loc[first_test_index:]) + 1)
+                if first_test_index > group.index[0]:
+                    group.loc[:first_test_index - 1, 'fcst_lag'] = float('nan')
+            return group
+
+        return df.groupby(group_columns, group_keys=False).apply(apply_fcst_lag)

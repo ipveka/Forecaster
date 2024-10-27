@@ -10,5 +10,8 @@ matplotlib
 # Scikit-learn
 scikit-learn
 
+# Stats
+statsmodels
+
 # Other
 google

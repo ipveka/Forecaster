@@ -12,8 +12,8 @@ from lightgbm import LGBMRegressor
 from sklearn.preprocessing import LabelEncoder
 
 # Create Baselines class
-
 class CreateBaselines:
+    # Init
     def __init__(self):
         """
         Initialize the CreateBaselines class. This class provides methods to calculate
