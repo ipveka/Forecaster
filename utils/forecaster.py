@@ -21,6 +21,9 @@ from sklearn.model_selection import RandomizedSearchCV
 from sklearn.model_selection import GridSearchCV
 from sklearn.feature_selection import mutual_info_regression
 
+# Statsmodels
+from statsmodels.tsa.seasonal import seasonal_decompose
+
 # Forecaster
 from lightgbm import LGBMRegressor
 
@@ -40,8 +43,8 @@ from math import ceil
 import torch
 
 # Forecaster class
-
 class Forecaster:
+    # Init
     def __init__(self, df_input):
         """
         Initialize the Predictor with the input dataframe.
@@ -56,17 +59,51 @@ class Forecaster:
         self.feature_importances = {}
         self.best_hyperparams = {}
 
-    def remove_outliers(self, column, group_cols, lower_quantile=0.025, upper_quantile=0.975):
+    # Remove outliers
+    def remove_outliers(self, column, group_cols, lower_quantile=0.025, upper_quantile=0.975, ts_decomposition=False):
         """
         Cap the outliers in a specified column for each group defined by group_cols.
+        Optionally, use time series decomposition to detect outliers in the residuals.
+        
+        Parameters:
+        - column: The column from which to remove outliers.
+        - group_cols: The columns to group by for calculating quantiles.
+        - lower_quantile: The lower quantile threshold for capping.
+        - upper_quantile: The upper quantile threshold for capping.
+        - ts_decomposition: If True, decompose the time series to find outliers in the residuals.
         """
-        # Calculate lower and upper bounds for each group using transform
-        lower_bounds = self.df.groupby(group_cols)[column].transform(lambda x: x.quantile(lower_quantile))
-        upper_bounds = self.df.groupby(group_cols)[column].transform(lambda x: x.quantile(upper_quantile))
+        if ts_decomposition:
+            # Ensure that the column is suitable for time series decomposition
+            for group in self.df[group_cols].unique():
+                group_data = self.df[self.df[group_cols].eq(group).all(axis=1)]
 
-        # Cap the outliers using vectorized operations
-        self.df[column] = np.clip(self.df[column], lower_bounds, upper_bounds)
+                # Check for sufficient data points for decomposition
+                if len(group_data) < 2:  # Change this threshold as needed
+                    continue
 
+                # Decompose the time series
+                result = seasonal_decompose(group_data[column], model='additive', period=1)  # Adjust period as needed
+                residual = result.resid
+
+                # Calculate lower and upper bounds for residuals
+                lower_bounds = np.quantile(residual.dropna(), lower_quantile)
+                upper_bounds = np.quantile(residual.dropna(), upper_quantile)
+
+                # Determine outliers based on residuals
+                outlier_mask = (residual < lower_bounds) | (residual > upper_bounds)
+
+                # Replace the outliers in the original column based on the outlier mask
+                self.df.loc[outlier_mask, column] = np.clip(self.df.loc[outlier_mask, column], lower_bounds, upper_bounds)
+
+        else:
+            # Calculate lower and upper bounds for each group using transform
+            lower_bounds = self.df.groupby(group_cols)[column].transform(lambda x: x.quantile(lower_quantile))
+            upper_bounds = self.df.groupby(group_cols)[column].transform(lambda x: x.quantile(upper_quantile))
+
+            # Cap the outliers using vectorized operations
+            self.df[column] = np.clip(self.df[column], lower_bounds, upper_bounds)
+
+    # Prepare data
     def _prepare_data(self, df, features, target_col):
         """
         Prepare the training and testing data for a specific cutoff and training group.
@@ -95,8 +132,9 @@ class Forecaster:
         except Exception as e:
             print(f"Error occurred in prepare_data function: {str(e)}")
             raise
-
-    def prepare_features_for_selection(self, train_data, group_cols, numeric_features, target_col, sample_fraction=0.20):
+    
+    # Prepare features for selection
+    def prepare_features_for_selection(self, train_data, group_cols, numeric_features, target_col, sample_fraction=0.25):
         """
         This function prepares the features for selection by:
 
@@ -139,7 +177,8 @@ class Forecaster:
 
         return X_sampled, y_sampled
 
-    def select_best_features(self, X, y, group_cols, n_best_features, n_groups=5000):
+    # Select best features
+    def select_best_features(self, X, y, group_cols, n_best_features):
         """
         Select the best numeric features using mutual information regression for time series data,
         grouped by group_cols, using a subset of random groups.
@@ -147,7 +186,6 @@ class Forecaster:
         :param y: Series of target values
         :param group_cols: List of columns to group by
         :param n_best_features: Number of best features to select
-        :param n_groups: Number of random groups to use for feature selection
         :return: List of selected feature names
         """
         # Select only float64 columns
@@ -181,6 +219,7 @@ class Forecaster:
 
         return best_features
 
+    # Load default params
     def load_default_params_and_distributions(self):
         """
         Load default parameters and hyperparameter distributions for the model.
@@ -194,26 +233,39 @@ class Forecaster:
             'objective': 'regression',
             'metric': 'rmse',
             'boosting_type': 'gbdt',
-            'num_iterations': 1000,
+            'n_estimators': 2000,
             'learning_rate': 0.01,
             'num_leaves': 32,
             'max_depth': 8,
-            'verbosity': -1
+            'verbose': -1
         }
 
         default_param_distributions = {
+            # Core Parameters
             'objective': ['regression'],
-            'boosting_type': ['gbdt'],
-            'num_iterations': [500, 1000, 1500],
-            'learning_rate': [0.01, 0.025, 0.05],
-            'num_leaves': [16, 32, 48],
-            'max_depth': [4, 8, 12]
+            'boosting_type': ['gbdt', 'dart'],
+            'metric': ['rmse', 'mae'],
+            'n_estimators': [1000, 2000, 3000],
+            'learning_rate': [0.01, 0.05, 0.10],
+            'num_leaves': [16, 31, 48],
+            'max_depth': [4, 8, 12],
+            # Control Overfitting Parameters
+            'min_data_in_leaf': [20, 50, 80],
+            'feature_fraction': [0.7, 0.8, 0.9],
+            'bagging_fraction': [0.7, 0.8, 0.9],
+            'bagging_freq': [1, 3, 5, 9],
+            # Regularization Parameters
+            'lambda_l1': [0.0, 0.4, 1.0],
+            'lambda_l2': [0.0, 0.4, 1.0],
+            'min_gain_to_split': [0.0, 0.1, 0.2],
+            'min_child_weight': [1e-3, 1e-2, 1e-1]
         }
 
         return default_params, default_param_distributions
 
+    # Tune hyperparameters
     def _tune_hyperparameters(self, X_train, y_train, param_distributions, search_method='halving', n_splits=4,
-                              scoring='neg_root_mean_squared_error', n_iter=30, sample_weight=None):
+                              scoring='neg_root_mean_squared_error', n_iter=50, sample_weight=None):
         """
         Tune hyperparameters using the specified search method.
 
@@ -232,9 +284,9 @@ class Forecaster:
 
         # Set the device for LGBMRegressor
         if torch.cuda.is_available():
-            base_model = LGBMRegressor(device_type='gpu', verbosity=-1)
+            base_model = LGBMRegressor(device_type='gpu', verbose=-1)
         else:
-            base_model = LGBMRegressor(verbosity=-1)
+            base_model = LGBMRegressor(verbose=-1)
 
         # Choose the appropriate search method
         if search_method == 'grid':
@@ -261,12 +313,18 @@ class Forecaster:
             search = HalvingRandomSearchCV(
                 estimator=base_model,
                 param_distributions=param_distributions,
-                max_resources=2500,
+                resource='n_samples',
+                min_resources=250, 
+                max_resources=3000,
+                aggressive_elimination=True,
+                error_score='raise',
+                return_train_score=False,
+                refit=True,
                 cv=tscv,
                 factor=3,
                 scoring=scoring,
                 n_jobs=-1,
-                verbose=1,
+                verbose=0,
                 random_state=42
             )
         else:
@@ -280,6 +338,7 @@ class Forecaster:
 
         return search.best_estimator_, search.best_params_
 
+    # Train model
     def train_model(self, df, cutoff, features, params, training_group, training_group_val, target_col,
                     use_weights=False, tune_hyperparameters=False, search_method='halving',
                     param_distributions=None, scoring='neg_root_mean_squared_error'):
@@ -345,16 +404,19 @@ class Forecaster:
         # Return the modified DataFrame
         return df
 
+    # Process cutoff function
     def process_cutoff(self, cutoff, features, params, target_col, training_group,
-                       training_group_values, tune_hyperparameters, search_method,
-                       param_distributions, scoring, best_features, n_best_features,
-                       group_cols, baseline_col, use_guardrail, guardrail_limit,
-                       use_weights):
+                   training_group_values, tune_hyperparameters, search_method,
+                   param_distributions, scoring, best_features, n_best_features,
+                   group_cols, baseline_col, use_guardrail, guardrail_limit,
+                   use_weights, current_cutoff_idx, total_cutoffs):
         """
-        Process cutoff function
+        Process cutoff function with progress updates
         """
         try:
-            print(f"Processing cutoff: {cutoff}")
+            # Calculate and display cutoff progress percentage
+            cutoff_progress = (current_cutoff_idx + 1) / total_cutoffs * 100
+            print(f"\nProcessing cutoff {current_cutoff_idx + 1}/{total_cutoffs} ({cutoff_progress:.2f}%) - Cutoff: {cutoff}")
             print("----------------------------------------------------------")
 
             # Create empty object for results
@@ -406,9 +468,11 @@ class Forecaster:
                 print(f"No feature selection: Using all features provided")
                 features_to_use = features
 
-            # Iterate over training groups
-            for training_group_val in training_group_values:
-                print(f"Training and predicting for cutoff: {cutoff}, training group: {training_group_val}")
+            # Iterate over training groups and track progress
+            total_training_groups = len(training_group_values)
+            for idx, training_group_val in enumerate(training_group_values):
+                group_progress = (idx + 1) / total_training_groups * 100
+                print(f"Training and predicting for cutoff: {cutoff}, training group: {training_group_val} ({group_progress:.2f}% of groups in cutoff)")
 
                 # Filter scope
                 cutoff_df_tg = cutoff_df[cutoff_df[training_group] == training_group_val]
@@ -416,7 +480,7 @@ class Forecaster:
                 # Train model will save results
                 try:
                     cutoff_df_results = self.train_model(cutoff_df_tg, cutoff, features_to_use, params, training_group, training_group_val, target_col,
-                                                         use_weights, tune_hyperparameters, search_method, param_distributions, scoring)
+                                                        use_weights, tune_hyperparameters, search_method, param_distributions, scoring)
                 except Exception as e:
                     print(f"Error occurred while training model for cutoff {cutoff}, training group {training_group_val}: {str(e)}")
                     raise
@@ -454,14 +518,16 @@ class Forecaster:
             print(f"Error occurred while processing cutoff {cutoff}: {str(e)}")
             raise
 
+    # Wrapper for parallel computing
     def process_cutoff_wrapper(self, args):
         return self.process_cutoff(*args)
 
+    # Run backtesting
     def run_backtesting(self, group_cols=None, features=None, params=None, training_group='training_group',
                         target_col='sales', tune_hyperparameters=False, search_method='halving',
                         param_distributions=None, scoring='neg_mean_squared_log_error', best_features=None,
                         n_best_features=15, remove_outliers=False, outlier_column=None,
-                        lower_quantile=0.025, upper_quantile=0.975, baseline_col=None,
+                        lower_quantile=0.025, upper_quantile=0.975, ts_decomposition=False, baseline_col=None,
                         use_guardrail=False, guardrail_limit=2.5, use_weights=False,
                         use_parallel=True, num_cpus=None):
         """
@@ -489,7 +555,8 @@ class Forecaster:
             if remove_outliers and outlier_column and group_cols:
                 try:
                     new_group_cols = group_cols + ['cutoff']
-                    self.remove_outliers(outlier_column, group_cols=new_group_cols, lower_quantile=lower_quantile, upper_quantile=upper_quantile)
+                    self.remove_outliers(outlier_column, group_cols=new_group_cols, lower_quantile=lower_quantile, upper_quantile=upper_quantile, 
+                                         ts_decomposition=ts_decomposition)
                 except Exception as e:
                     print(f"Error occurred while removing outliers: {str(e)}")
                     raise
@@ -541,8 +608,7 @@ class Forecaster:
                                       training_group_values, tune_hyperparameters, search_method,
                                       param_distributions, scoring, best_features, n_best_features,
                                       group_cols, baseline_col, use_guardrail, guardrail_limit,
-                                      use_weights)
-                                    for c in cutoffs]
+                                      use_weights, idx, len(cutoffs)) for idx, c in enumerate(cutoffs)]
                         results = list(executor.map(self.process_cutoff_wrapper, args_list))
                 except Exception as e:
                     print(f"Error occurred during parallel processing: {str(e)}")
@@ -554,8 +620,7 @@ class Forecaster:
                                               training_group_values, tune_hyperparameters, search_method,
                                               param_distributions, scoring, best_features, n_best_features,
                                               group_cols, baseline_col, use_guardrail, guardrail_limit,
-                                              use_weights)
-                          for c in cutoffs]
+                                              use_weights, idx, len(cutoffs)) for idx, c in enumerate(cutoffs)]
 
             # Combine results
             if len(cutoffs) == 1:
@@ -572,8 +637,9 @@ class Forecaster:
         except Exception as e:
             print(f"An unexpected error occurred in run_predictions: {str(e)}")
             raise
-
-    def calculate_guardrail(self, data, group_cols, baseline_col, guardrail_limit=3):
+    
+    # Calculate guardrail
+    def calculate_guardrail(self, data, group_cols, baseline_col, guardrail_limit=2.5):
         """
         Calculate and apply guardrails to predictions, and add an indicator for guardrail application.
 
@@ -606,6 +672,7 @@ class Forecaster:
 
         return adjusted_data
 
+    # Plot feature importance
     def plot_feature_importance(self):
         """
         Plot the average feature importance across all cutoffs and training groups.
@@ -659,10 +726,11 @@ class Forecaster:
         plt.xlabel('Average Importance', fontsize=14)
         plt.ylabel('Features', fontsize=14)
         plt.title('Average Feature Importance Across Cutoffs and Training Groups', fontsize=16)
-        plt.gca().invert_yaxis()  # Invert y-axis to show most important features at the top
+        plt.gca().invert_yaxis()
         plt.tight_layout()
         plt.show()
 
+    # Get feature importance
     def get_feature_importance(self):
         """
         Retrieve the feature importances for each training group and cutoff.
@@ -671,6 +739,7 @@ class Forecaster:
         """
         return self.feature_importances
 
+    # Get best hyperparameters
     def get_best_hyperparams(self):
         """
         Retrieve the best hyperparameters found for each training group and cutoff during hyperparameter tuning.

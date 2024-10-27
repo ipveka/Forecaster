@@ -12,14 +12,13 @@ from lightgbm import LGBMRegressor
 from sklearn.preprocessing import LabelEncoder
 
 # Data preparation class
-
 class DataPreparation:
+    # Init
     def __init__(self):
         pass
 
-    # Prepare data
     def run_data_preparation(self, df, group_cols, date_col, target, horizon, freq, complete_dataframe=True,
-                             smoothing=True, ma_window_size=13, n_cutoffs=13):
+                         smoothing=True, ma_window_size=13, n_cutoffs=13):
         """
         Main function to prepare the data by calling all internal functions in order.
 
@@ -38,30 +37,37 @@ class DataPreparation:
         Returns:
         pd.DataFrame: Prepared DataFrame
         """
+        # Start function
+        print("Starting data preparation...")
 
         # Complete logic
         if complete_dataframe:
             df = self.complete_dataframe(df, group_cols, date_col)
+            print("Completed DataFrame by filling in missing values.")
 
         # Find all numeric columns to be treated as signals
-        signal_cols = [col for col in df.select_dtypes(include=['float64']).columns if col != target]
+        signal_cols = [col for col in df.select_dtypes(include=['float64']).columns]
+        print(f"Identified signal columns: {signal_cols}")
 
         # Smoothing of signals
         if smoothing:
-            df = self.smoothing(df, signal_cols, ma_window_size)
-            # Update target
-            target = f'filled_' + target
+            df = self.smoothing(df, group_cols, date_col, signal_cols, ma_window_size)
+            print(f"Applied smoothing with a moving average window size of {ma_window_size}.")
 
         # Get last cutoffs
-        cutoff_dates = self.get_first_dates_last_n_months(n_cutoffs)
+        cutoff_dates = self.get_first_dates_last_n_months(df, date_col, n_cutoffs)
+        print(f"Identified cutoff dates for backtesting: {cutoff_dates}")
 
         # Create backtesting
-        df = self.create_backtesting_df(df, cutoff_dates)
+        df = self.create_backtesting_df(df, date_col, cutoff_dates)
+        print("Created backtesting DataFrame.")
 
         # Add horizon for last cutoff
-        df = self.add_horizon_last_cutoff(df, horizon, freq)
+        df = self.add_horizon_last_cutoff(df, group_cols, date_col, horizon, freq)
+        print("Added forecasting horizon for the last cutoff.")
 
-        # Return
+        # Final message and return
+        print("Data preparation completed. Returning prepared DataFrame.")
         return df
 
     # Complete dataframe
@@ -144,6 +150,9 @@ class DataPreparation:
 
                 # Fill missing values (NaN) in the signal column with the rolling mean
                 df_copy.loc[group.index, filled_signal_column] = group[signal_column].fillna(rolling_mean)
+
+                # Ensure that the filled values are greater than zero
+                df_copy[filled_signal_column] = df_copy[filled_signal_column].clip(lower=0)
 
         # Return the modified dataframe with the new columns where missing values are filled
         return df_copy

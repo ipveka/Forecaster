@@ -152,8 +152,20 @@ This class is designed to facilitate the creation of various features necessary 
 - **Description**: Creates a 'weight' column for each group in a DataFrame, giving more weight to recent observations. Weights are calculated only for rows where 'sample' is 'train'.
 - **Parameters**:
   - `df`: Input DataFrame.
-  - `group_cols`: List of columns to group by.
+  - `group_columns`: List of columns to group by.
   - `feature_periods_col`: Column name for the feature periods (e.g., weeks since inception).
-  - `train_weight_type`: The type of weighting to use ('exponential' or 'linear'). Defaults to 'exponential'.
+  - `train_weight_type`: The type of weighting to use ('exponential' or 'linear'). Defaults to 'linear'.
 - **Returns**: A copy of the input DataFrame with an added 'weight' column for 'train' samples.
 
+## 14. `create_fcst_lag_number`
+
+- **Description**: Adds a `fcst_lag` column to the DataFrame that starts counting rows within each group from the first occurrence of `sample = 'test'`. The count starts at 1 for the first row where `sample` is `'test'`, and increments by 1 for subsequent rows. Rows before the first `'test'` sample in each group will have `fcst_lag` set to `NaN`.
+  
+- **Parameters**:
+  - `df`: Input DataFrame containing data to process.
+  - `group_columns`: List of columns to group by, such as `['client', 'warehouse', 'product', 'cutoff']`.
+  - `date_col`: Column used to order rows within each group. Defaults to `'date'`.
+  - `sample_col`: Column name that identifies the target sample, such as `'sample'`.
+  - `target_sample`: Value within `sample_col` to start counting from, usually `'test'`. Defaults to `'test'`.
+  
+- **Returns**: A copy of the input DataFrame with an added `fcst_lag` column, containing sequential counts for `sample = 'test'` rows in each group.

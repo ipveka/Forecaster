@@ -1,11 +1,12 @@
-# ⚡ LightGBM-Forecaster 
+# ⚡ LightGBM-Forecaster
 
 **LightGBM-Forecaster** is a time series forecasting project powered by **LightGBM**. It streamlines the forecasting pipeline with dedicated classes for each stage, from data preparation to model evaluation, making it adaptable to various time series forecasting use cases.
 
 Created initially for the [Forecasting competition VN1 Forecasting](https://www.datasource.ai/en/home/data-science-competitions-for-startups/phase-2-vn1-forecasting-accuracy-challenge/description), this project can be tailored to other datasets and forecasting needs.
 
----
+You can download the data from: https://www.datasource.ai/en/home/data-science-competitions-for-startups/vn1-forecasting-accuracy-challenge-phase-1/datasets
 
+---
 
 ## 🌟 Highlights
 
@@ -19,7 +20,7 @@ The `LightGBM-Forecaster` project offers several classes that help create featur
 
 - **Support for Grouped Data** 👥: Generates models for various data segments, tailoring forecasts to each.
 
-- **Parallel and GPU Computing** 🚀: Accelerates training with parallel processing and GPU support.
+- **Parallel and GPU Computing** 🚀: Accelerates training with parallel processing and GPU support (In development)
 
 ---
 
@@ -31,13 +32,15 @@ The project is built around five primary classes, each handling specific stages 
    Prepares datasets by handling missing values, transforming data types, and ensuring a clean, model-ready structure.
 
 - **`FeatureEngineering`** 🔍  
-   Generates and refines relevant features, including time-based transformations, clustering and segmentation techniques to optimize input data for LightGBM.
+   Using outputs from DataPreparation, generates and refines relevant features, including time-based transformations, clustering and segmentation techniques to optimize input data for LightGBM.
+   This module creates the needed structure for backtesting with the specified number of cutoffs (train/test splits)
 
 - **`CreateBaselines`** 🧩  
-   Develops baseline models as a benchmark, enabling users to compare LightGBM's improvements against simpler models.
+   Develops baseline models as a benchmark, enabling users to compare LightGBM's improvements against simpler models. These will be used both for the forecast model and for evaluation
 
 - **`Forecaster`** 🔮  
-   The core class, responsible for training the LightGBM model and managing the forecasting tasks with efficiency and precision.
+   The core class, responsible for training the LightGBM model and managing the forecasting tasks with efficiency and precision. 
+   This class will use the output from FeatureEngineering to generate the foreast for each cutoff.
 
 - **`Evaluator`** 📊  
    Evaluates model performance with key metrics and visualizations, helping users interpret forecasting accuracy and reliability.
@@ -58,8 +61,8 @@ The repository is organized into several folders for easy navigation:
   Interactive Jupyter notebooks demonstrating the LightGBM-Forecaster workflow, including:
   - **`data_preparation`**: Data prep, backtesting DataFrame creation, and baseline modeling.
   - **`lightgbm`**: Model evaluation and forecasting using LightGBM.
-  - **`submission`**: Guides final output formatting for submission.
-  - **`runner`**: An end-to-end workflow notebook (currently in development).
+  - **`submission`**: Creates final output formatting for submission.
+  - **`runner`**: An end-to-end workflow notebook.
 
 - **`submissions`**  
   Contains the forecast model outputs, including predictions and performance metrics.
@@ -74,12 +77,17 @@ The repository is organized into several folders for easy navigation:
 Following the use case for the Forecasting competition VN1, this project contains end to end notebook examples using the data provided for the competition. The dataset used for both phases look like this:
 
 - **Sales Data** (Phase X - `Sales.csv`): Weekly sales units.
-
 - **Price Data** (Phase X - `Price.csv`): Pricing data based on actual transactions.
 
 In the data preparation notebook we join the tables from all phases. 
 
 All information is provided at Client-Warehouse-Product-Week level
+
+---
+
+## Definitions
+
+- **Cutoff**: The date from which the test set begins. It is crucial for splitting the dataset into training and testing subsets. The training data consists of all observations prior to the cutoff date, while the test set includes observations on or after this date. Properly defining the cutoff helps in evaluating the model's performance on unseen data.
 
 ---
 
@@ -91,11 +99,15 @@ The `requirements.txt` file lists necessary libraries, simplifying setup. Instal
 pip install -r requirements.txt
 ```
 
+---
+
 ## How to Use
 
 To utilize the **LightGBM-Forecaster** project, you'll need to import the relevant classes from the `utils` folder. Each class is designed to handle specific tasks within the time series forecasting pipeline.
 
-### Importing classes
+---
+
+## Importing classes
 
 You can import the necessary classes as follows:
 
