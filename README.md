@@ -51,23 +51,23 @@ The project is built around five primary classes, each handling specific stages 
 
 The repository is organized into several folders for easy navigation:
 
-- **`data`**  
+- **`data`**
   Contains both raw and processed datasets. The processed datasets are ready for model training following data cleaning and feature engineering.
 
-- **`docs`**  
+- **`docs`**
   Comprehensive project documentation, detailing the classes, functions, architecture, and usage guidelines.
 
-- **`notebooks`** 📝  
+- **`notebooks`**
   Interactive Jupyter notebooks demonstrating the LightGBM-Forecaster workflow, including:
   - **`data_preparation`**: Data prep, backtesting DataFrame creation, and baseline modeling.
   - **`lightgbm`**: Model evaluation and forecasting using LightGBM.
   - **`submission`**: Creates final output formatting for submission.
   - **`runner`**: An end-to-end workflow notebook.
 
-- **`submissions`**  
+- **`submissions`**
   Contains the forecast model outputs, including predictions and performance metrics.
 
-- **`utils`** 🔧  
+- **`utils`**
   The utility folder holding the main classes, auxiliary functions, and plotting tools for the project.
 
 ---
