@@ -18,7 +18,7 @@ class DataPreparation:
         pass
 
     def run_data_preparation(self, df, group_cols, date_col, target, horizon, freq, complete_dataframe=True,
-                         smoothing=True, ma_window_size=13, n_cutoffs=13):
+                             smoothing=True, ma_window_size=13, n_cutoffs=13):
         """
         Main function to prepare the data by calling all internal functions in order.
 
@@ -65,6 +65,9 @@ class DataPreparation:
         # Add horizon for last cutoff
         df = self.add_horizon_last_cutoff(df, group_cols, date_col, horizon, freq)
         print("Added forecasting horizon for the last cutoff.")
+
+        # Final formatting
+        df['cutoff'] = pd.to_datetime(df['cutoff'])
 
         # Final message and return
         print("Data preparation completed. Returning prepared DataFrame.")

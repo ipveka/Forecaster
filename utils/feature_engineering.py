@@ -216,7 +216,7 @@ class FeatureEngineering:
 
         # Create weekly features if specified
         if freq == 'W':
-            df['feature_week'] = df[date_col].dt.isocalendar().week
+            df['feature_week'] = df[date_col].dt.isocalendar().week.astype(int)
         elif freq != 'M':
             raise ValueError("Frequency must be either 'W' for weekly or 'M' for monthly.")
 
@@ -756,7 +756,7 @@ class FeatureEngineering:
         Returns:
         --------
         pd.DataFrame
-            The DataFrame with an added `fcst_lag` column.
+            The DataFrame with an added `fcst_lag` column as integer.
         """
         # Ensure group_columns is a list
         if isinstance(group_columns, str):
@@ -764,19 +764,24 @@ class FeatureEngineering:
         elif not isinstance(group_columns, list):
             raise ValueError("group_columns must be a list or a string.")
 
-        # Sort DataFrame - calling sort_values() directly on the DataFrame
+        # Sort DataFrame by group columns and date
         df = df.sort_values(by=group_columns + [date_col]).copy()
         
-        # Auxiliar fcst lag function
+        # Auxiliary forecast lag function
         def apply_fcst_lag(group):
             start_index = group.index[group[sample_col] == target_sample]
             if len(start_index) == 0:
-                group['fcst_lag'] = float('nan')
+                group['fcst_lag'] = np.nan
             else:
                 first_test_index = start_index[0]
+                # Use range with integers for fcst_lag
                 group.loc[first_test_index:, 'fcst_lag'] = range(1, len(group.loc[first_test_index:]) + 1)
                 if first_test_index > group.index[0]:
-                    group.loc[:first_test_index - 1, 'fcst_lag'] = float('nan')
+                    group.loc[:first_test_index - 1, 'fcst_lag'] = np.nan
             return group
 
-        return df.groupby(group_columns, group_keys=False).apply(apply_fcst_lag)
+        # Apply function to each group and cast to integer after filling NaN
+        df = df.groupby(group_columns, group_keys=False).apply(apply_fcst_lag)
+        df['fcst_lag'] = df['fcst_lag'].astype('Int64')
+
+        return df

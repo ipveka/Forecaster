@@ -1,3 +1,16 @@
+# Ignore Python cache and checkpoints
+__pycache__/
+*.pyc
+
+# Ignore Jupyter notebook checkpoints
+.ipynb_checkpoints/
+
+# Ignore Jupyter config directory
+.jupyter/
+
+# Ignore macOS system files
+.DS_Store
+
 # Ignore all CSV files
 *.csv
 
