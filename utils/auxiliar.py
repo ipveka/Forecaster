@@ -23,6 +23,12 @@ from lightgbm import LGBMRegressor
 # Sklearn
 from sklearn.preprocessing import LabelEncoder
 
+# Options
+warnings.filterwarnings("ignore", category=DeprecationWarning)
+warnings.filterwarnings("ignore", category=UserWarning)
+warnings.simplefilter(action='ignore', category=pd.errors.PerformanceWarning)
+pd.options.mode.chained_assignment = None
+
 # Auxiliar functions
 
 # Unpivot data
@@ -51,21 +57,21 @@ def unpivot_data(df, id_vars, var_name='Date', value_name='Price'):
     return df_unpiv
 
 # Function to create a single axis plot for a specific entity
-def create_single_axis_plot(ax, df, entity, group_col, cutoff, baseline_col, title):
+def create_single_axis_plot(ax, df, entity, group_col, cutoff, baseline_col, target_col, title):
     """
     Create a single-axis plot for the specified entity on the given axis.
 
     :param ax: The axis to plot on
-    :param df: DataFrame containing sales, predictions, baseline, and filled sales data for the entity
+    :param df: DataFrame containing sales, predictions, baseline, and filled target data for the entity
     :param entity: The entity to plot (e.g., product, store)
     :param group_col: The column name used for grouping (e.g., entity, store, product)
     :param cutoff: The cutoff date for the analysis
     :param baseline_col: The column name for baseline data
+    :param target_col: The column name for target data (e.g., sales)
     :param title: Title for the plot
     """
-    # Plot sales, predictions, baseline, and filled_sales for the selected entity
-    ax.plot(df['date'], df['sales'], label=f'{entity} (Sales)', color='tab:blue')
-    ax.plot(df['date'], df['filled_sales'], label=f'{entity} (Filled Sales)', color='orange', linestyle='-', alpha=0.8)
+    # Plot sales, predictions, baseline, and filled target for the selected entity
+    ax.plot(df['date'], df[target_col], label=f'{entity} (Sales)', color='tab:blue')
     ax.plot(df['date'], df['prediction'], label=f'{entity} (Prediction)', color='tab:green', linestyle='--')
     ax.plot(df['date'], df[baseline_col], label=f'{entity} (Baseline)', color='tab:red', linestyle='--', alpha=0.7)
 
@@ -85,13 +91,14 @@ def create_single_axis_plot(ax, df, entity, group_col, cutoff, baseline_col, tit
     ax.legend(fontsize=6, frameon=True, loc='upper left')
 
 # Function to process and plot data for each cutoff and entity
-def process_and_plot(df, group_col, baseline_col='baseline', top_n=1, title=''):
+def process_and_plot(df, group_col, baseline_col='baseline', target_col='sales', top_n=1, title=''):
     """
     Process and plot sales, predictions, and baseline data for each cutoff and entity in a 2-column layout.
 
     :param df: The input DataFrame containing sales, predictions, and baseline data
     :param group_col: The column name to group the data by (e.g., entity, store, product)
     :param baseline_col: The column name for the baseline data (default is 'baseline')
+    :param target_col: The column name for target data (default is 'sales')
     :param top_n: The number of top entities to visualize based on total sales
     :param title: Title for the plot
     """
@@ -102,15 +109,15 @@ def process_and_plot(df, group_col, baseline_col='baseline', top_n=1, title=''):
     cutoffs = df['cutoff'].unique()
 
     # Select top N entities based on total sales
-    top_entities = df.groupby(group_col)['sales'].sum().nlargest(top_n).index
+    top_entities = df.groupby(group_col)[target_col].sum().nlargest(top_n).index
 
     # Number of subplots: rows for the plot grid
     total_plots = len(top_entities) * len(cutoffs)
-    rows = ceil(total_plots / 2) # 2 columns per row
+    rows = ceil(total_plots / 2)
 
     # Create the figure and axes with the required number of subplots
     fig, axes = plt.subplots(rows, 2, figsize=(16, rows * 4))
-    axes = axes.flatten()  # Flatten axes array for easier indexing
+    axes = axes.flatten()
 
     # Loop over each top entity
     plot_idx = 0
@@ -121,14 +128,13 @@ def process_and_plot(df, group_col, baseline_col='baseline', top_n=1, title=''):
 
             # Group data by date, summing sales, predictions, and baselines
             df_grouped = df_cutoff.groupby(['date']).agg({
-                'sales': 'sum',
-                'filled_sales': 'sum',
+                target_col: 'sum',
                 'prediction': 'sum',
                 baseline_col: 'sum'
             }).reset_index()
 
             # Create a plot on the respective axis
-            create_single_axis_plot(axes[plot_idx], df_grouped, entity, group_col, cutoff, baseline_col, title)
+            create_single_axis_plot(axes[plot_idx], df_grouped, entity, group_col, cutoff, baseline_col, target_col, title)
             plot_idx += 1
 
             # Ensure the figure fits well within the layout

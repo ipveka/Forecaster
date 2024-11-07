@@ -1,35 +1,69 @@
-# ⚡ LightGBM-Forecaster
+# ⚡ Forecaster
 
-**LightGBM-Forecaster** is a time series forecasting project using **LightGBM**. It streamlines the forecasting pipeline with dedicated classes for each stage, from data preparation to model evaluation, making it adaptable to various time series forecasting use cases.
+**Forecaster** is a time series forecasting project using **LightGBM** and other gradient boosting models. It streamlines the forecasting pipeline with dedicated classes for each stage, from data preparation to model evaluation, making it adaptable to various time series forecasting use cases.
 
-Created initially for the [Forecasting competition VN1 Forecasting](https://www.datasource.ai/en/home/data-science-competitions-for-startups/phase-2-vn1-forecasting-accuracy-challenge/description), this project can be tailored to other datasets and forecasting needs.
+This project uses as example data provided for the HP Supply Chain Optimization challenge at HackUPC 2023. You can see all related information here: https://www.kaggle.com/competitions/hp-supply-chain-optimization
 
-You can download the data from: https://www.datasource.ai/en/home/data-science-competitions-for-startups/vn1-forecasting-accuracy-challenge-phase-1/datasets
+## Models available
 
-## ⚙️ Why LightGBM is Great for Forecasting
+1. **LightGBM Regressor (LGBM)**: A gradient boosting model optimized for speed and efficiency, often used for large datasets.
+2. **Random Forest Regressor (RF)**: An ensemble method that combines multiple decision trees for robust predictions.
+3. **Gradient Boosting Regressor (GBM)**: A boosting model that builds sequential trees, each correcting the errors of the previous ones.
+4. **AdaBoost Regressor (ADA)**: A boosting technique using weak learners, typically decision trees, to improve overall model performance.
+5. **Linear Regression (LR)**: A linear model often used as a baseline; performs well with simple relationships between features and target
 
-LightGBM, or **Light Gradient Boosting Machine**, is a high-performance algorithm designed for fast and efficient model building, making it ideal for complex forecasting tasks. Here’s a quick breakdown of how it works and why it’s so effective for time series forecasting:
+## 🌟 Why Gradient Boosting models are great for Forecasting
 
-### 🌿 **How LightGBM Works**
+Gradient boosting machine (GBM) models are powerful tools for time series forecasting. They excel in capturing complex patterns, handling a wide range of data types, and scaling efficiently to large datasets. **LightGBM** (Light Gradient Boosting Machine) stands out as a popular GBM variant due to its focus on speed, accuracy, and efficiency. Here’s a look into why GBMs are excellent for forecasting, with a focus on what makes LightGBM especially effective.
 
-LightGBM builds prediction models by iteratively creating trees that improve on previous ones. Key aspects include:
+### 🌿 The Power of Gradient Boosting in Forecasting
 
-- **Leaf-Wise Tree Growth**: Optimizes trees by focusing on the branches with the highest error reduction, leading to more accurate models.
-- **Categorical Feature Handling**: Handles categorical data like days or seasons directly, without extra preprocessing.
-- **Histogram-Based Learning**: Groups continuous values into discrete bins, reducing computation and speeding up training.
+At a high level, gradient boosting is an **ensemble learning** technique. It combines multiple weak learners, typically decision trees, in a sequential way to build a strong, predictive model. Here’s how it works:
 
-### ⏱ **Why It’s Efficient for Time Series Forecasting**
+1. **Sequential Model Improvement**: Gradient boosting builds models iteratively, each new model improving on the errors of the previous ones. This allows it to refine predictions progressively, enhancing accuracy with each step.
+2. **Focus on High-Error Instances**: By assigning higher weights to instances with larger prediction errors, GBM models excel at capturing hard-to-model data patterns, making them highly suitable for **nonlinear and seasonal relationships** often present in time series data.
+3. **Adaptability to Diverse Data**: GBMs handle various data types (continuous, categorical, and even missing data) with minimal preprocessing, adapting well to diverse real-world datasets.
 
-1. **Scalable for Large Datasets**: Ideal for handling complex, high-dimensional time series data, especially when many features are generated.
-2. **Captures Patterns and Trends**: Tree-based structure can capture nonlinear relationships and seasonal patterns.
-3. **Good for Grouped Data**: Supports segmented models for multiple groups, useful in multi-series forecasts like client or product-level forecasting.
-4. **Handles Missing and Noisy Data**: Naturally deals with missing values and is robust to outliers, both common in real-world data.
+### 🌿 How LightGBM Works
+
+LightGBM is a specialized, high-performance GBM variant that accelerates training and boosts efficiency without compromising accuracy. Its unique approach to tree growth and data processing makes it especially well-suited for forecasting:
+
+- **Leaf-Wise Tree Growth**: Unlike other GBMs that grow trees level-wise, LightGBM uses **leaf-wise growth**, adding nodes to the leaf with the highest potential error reduction. This yields **deeper, more accurate trees**, optimizing model performance.
+- **Histogram-Based Learning**: To reduce computation, LightGBM bins continuous values into discrete groups, allowing it to process large datasets efficiently while still capturing important trends and patterns.
+- **Built-In Categorical Handling**: LightGBM natively handles categorical variables, such as days of the week or seasons, without the need for preprocessing (e.g., one-hot encoding), making it easier to use with time series data.
+
+### ⏱ Advantages of LightGBM for Time Series Forecasting
+
+Here’s why LightGBM is a top choice for time series forecasting:
+
+1. **Scalability for Large Datasets**  
+   LightGBM is designed to handle large, high-dimensional datasets, such as those often encountered in time series forecasting with many features (e.g., lags, trends, and seasonal variables). Its **optimized memory usage and fast training** make it ideal for production-level forecasting tasks with millions of rows.
+
+2. **Pattern and Trend Recognition**  
+   Tree-based models, like those in LightGBM, inherently capture **nonlinear relationships** and complex dependencies. This structure makes it effective in capturing time series patterns, such as seasonality and trend changes, often leading to highly accurate forecasts.
+
+3. **Robustness to Missing and Noisy Data**  
+   Real-world time series data often contain missing values and noise. LightGBM’s handling of missing data within the model, along with its ability to **deal with outliers**, ensures robustness, preventing these issues from skewing predictions.
+
+4. **Flexibility for Grouped and Segmented Forecasting**  
+   In many forecasting scenarios, there’s a need to create separate forecasts for different groups or segments (e.g., regions, products, or customer segments). LightGBM’s structure supports **segmented modeling**, allowing the creation of multiple, tailored forecasts in a single model run, ideal for multi-series forecasting tasks.
+
+5. **Parallelized and GPU-Compatible**  
+   LightGBM’s parallelization capabilities and GPU support make it extremely efficient, allowing rapid iteration and tuning. This is especially beneficial for time series forecasting, where models may need frequent retraining or adjustments as new data becomes available.
+
+### 🧠 When to Use LightGBM for Forecasting
+
+LightGBM is especially effective for:
+
+- **High-Dimensional Forecasting**: When the dataset includes many features (e.g., weather, holiday flags, external drivers) that may impact future values.
+- **Complex Patterns**: Ideal when the series exhibits strong seasonal or trend components and nonlinear relationships.
+- **Multi-Series Forecasting**: When multiple series need to be forecasted in tandem (e.g., product or location-specific demand).
 
 ---
 
 ## 🌟 Highlights
 
-The `LightGBM-Forecaster` project offers several classes that help create features to boost accuracy and efficiency in forecasting:
+The `Forecaster` project offers several classes that help create features to boost accuracy and efficiency in forecasting:
 
 - **Backtesting Capabilities** 🧭: Simulates real-world model performance by evaluating it over time.
 - **Automatic Best Feature Selection** 🎯: Optimizes feature relevance automatically for enhanced model performance.
@@ -67,7 +101,7 @@ The project is structured around five primary classes, each responsible for a sp
    This class uses the outputs from `FeatureEngineering` to establish baseline models that serve as benchmarks, enabling users to evaluate LightGBM’s improvements over simpler models. It also generates simple forecasts for numeric signals.
 
 - **`Forecaster`** 🔮  
-   The core class for training the LightGBM model, `Forecaster` efficiently manages the forecasting process. This class leverages the features generated by `FeatureEngineering` and `CreateBaselines` to produce forecasts at each cutoff. Key capabilities include:
+   The core class for training the model, `Forecaster` efficiently manages the forecasting process. This class leverages the features generated by `FeatureEngineering` and `CreateBaselines` to produce forecasts at each cutoff. Key capabilities include:
    - **Setting training groups** to create one model for each relevant segments.
    - **Hyperparameter tuning** for optimal model performance.
    - **Feature selection** to enhance model efficiency.
@@ -86,16 +120,14 @@ The repository is organized into several folders for easy navigation:
 - **`data`**  
   Contains both raw and processed datasets. The processed datasets are ready for model training following data cleaning and feature engineering.
 
-  You can download the data from the examples here: https://www.datasource.ai/en/home/data-science-competitions-for-startups/vn1-forecasting-accuracy-challenge-phase-1/datasets
-
 - **`docs`**  
   Comprehensive project documentation, detailing the classes, functions, architecture, and usage guidelines.
 
 - **`notebooks`**  
   Jupyter notebooks demonstrating the LightGBM-Forecaster workflow, including:
+
   - **`data_preparation`**: Walks through each step of data preparation, feature engineering, and baseline creation individually, allowing users to customize executions.
-  - **`lightgbm`**: Covers model evaluation, hyperparameter tuning, feature selection, and forecasting using `Forecaster` class, with insights on both training and validation processes.
-  - **`submission`**: Prepares the final forecast output, formats it for submission, and includes post-processing steps to ensure compatibility with the desired output structure.
+  - **`forecasting`**: Covers model evaluation, hyperparameter tuning, feature selection, and forecasting using `Forecaster` class, with insights on both training and validation processes.
   - **`runner`**: An end-to-end workflow notebook utilizing the `run_data_preparation` and `run_feature_engineering` orchestrators to streamline the entire process, combined with `Forecaster` and `Evaluator` calls to create a complete forecasting pipeline.
 
 - **`submissions`**  
@@ -106,16 +138,44 @@ The repository is organized into several folders for easy navigation:
 
 ---
 
-### 📈 **Notebooks**  
+### 📈 **Example**  
 
-Following the use case for the Forecasting competition VN1, this project contains end to end notebook examples using the data provided for the competition. The dataset used for both phases look like this:
+Following the use case for HP Supply Chain Optimization challenge at HackUPC 2023, this project contains end to end notebook example (*runner*) using the data provided for the competition. The goal of this competition is to forecast the optimal inventory level that HP should have for multiple products on a weekly basis. To do this, the goal is to predict the inventory for the next 13 weeks for each of the 100 products.
 
-- **Sales Data** (Phase X - `Sales.csv`): Weekly sales units.
-- **Price Data** (Phase X - `Price.csv`): Pricing data based on actual transactions.
+## Files
 
-In the data preparation notebook we join the tables from all phases. 
+- **train.csv**: The training dataset containing historical data with all fields filled in. This file is used to train models.
 
-All information is provided at Client-Warehouse-Product-Week level
+- **test.csv**: The test dataset, containing data for which predictions are needed. 
+
+### Fields
+
+- **id**: Unique identifier of the time series. Format: `yearweek-product_number`
+    - Example: For the first week of 2023 and the product "1234567," the id would be `202301-1234567`.
+
+- **date**: Date of record in `YYYY-mm-dd` format.
+
+- **yearweek**: Year and week in `YYYYww` format.
+
+- **product_number**: Unique ID for each product.
+
+- **reporterhq_id**: Unique ID for each reseller (vendor).
+
+- **prod_category**: Product category with a humorous or unconventional name, grouping products from the same product line.
+
+- **specs**: Specifications of the product, which may include details like RAM, graphics card, or other components.
+
+- **display_size**: Display or screen size of the PC.
+
+- **segment**: Target segment of the product.
+
+- **sales_units**: Sales to the final customer of the product for that week.
+
+- **inventory_units**: Target variable representing inventory for each `product_number` and `reporterhq_id` for a specific week.
+
+### Evaluation
+
+Root Mean Squared Error (RMSE) is a popular evaluation metric used in many Kaggle competitions, especially in regression problems. It is a measure of the differences between predicted values and the actual values.
 
 ---
 

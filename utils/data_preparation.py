@@ -11,6 +11,12 @@ from sklearn.linear_model import LinearRegression
 from lightgbm import LGBMRegressor
 from sklearn.preprocessing import LabelEncoder
 
+# Options
+warnings.filterwarnings("ignore", category=DeprecationWarning)
+warnings.filterwarnings("ignore", category=UserWarning)
+warnings.simplefilter(action='ignore', category=pd.errors.PerformanceWarning)
+pd.options.mode.chained_assignment = None
+
 # Data preparation class
 class DataPreparation:
     # Init
@@ -42,7 +48,7 @@ class DataPreparation:
 
         # Complete logic
         if complete_dataframe:
-            df = self.complete_dataframe(df, group_cols, date_col)
+            df = self.complete(df, group_cols, date_col), freq
             print("Completed DataFrame by filling in missing values.")
 
         # Find all numeric columns to be treated as signals
@@ -70,19 +76,20 @@ class DataPreparation:
         df['cutoff'] = pd.to_datetime(df['cutoff'])
 
         # Final message and return
-        print("Data preparation completed. Returning prepared DataFrame.")
+        print("Data preparation completed.")
         return df
 
     # Complete dataframe
-    def complete_dataframe(self, df, group_cols, date_col):
+    def complete(self, df, group_cols, date_col, freq='W-MON'):
         """
-        Ensure that each group has all dates from its first to its last date.
+        Ensure that each group has all dates with a specified frequency from its first to its last date.
         Missing rows will be filled with NaN values.
 
         Parameters:
         df (pd.DataFrame): The original DataFrame.
         group_cols (list): List of columns to group by (e.g. ['client', 'warehouse', 'product']).
         date_col (str): The name of the date column.
+        freq (str): Frequency string for the date range (e.g., 'W-MON' for weekly on Mondays).
 
         Returns:
         pd.DataFrame: The completed DataFrame with all required date ranges for each group.
@@ -97,11 +104,11 @@ class DataPreparation:
         # Initialize an empty DataFrame to store the result
         completed_df = pd.DataFrame()
 
-        # Generate all required dates for each group
+        # Generate all required dates for each group based on the specified frequency
         for _, row in group_ranges.iterrows():
             start_date = row[f'{date_col}_min']
             end_date = row[f'{date_col}_max']
-            dates = pd.date_range(start=start_date, end=end_date)
+            dates = pd.date_range(start=start_date, end=end_date, freq=freq)
 
             # Create a DataFrame for this group with all dates
             temp_df = pd.DataFrame({
@@ -307,6 +314,10 @@ class DataPreparation:
 
         # Combine the processed latest cutoff data with the rest of the data
         result = pd.concat([rest_df, processed_latest], ignore_index=True)
+
+        # Fill forward all string columns
+        string_columns = result.select_dtypes(include='object').columns
+        result[string_columns] = result[string_columns].ffill()
 
         # Sort the final result
         result = result.sort_values(by=group_cols + ['cutoff', date_col])

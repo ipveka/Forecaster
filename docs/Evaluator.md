@@ -115,6 +115,7 @@ This class is designed to assess the performance of predictive models against ac
 - **Parameters**:
   - `metric_name`: The name of the metric to calculate (e.g., 'RMSE', 'MAE', etc.).
   - `group_col`: The column name used for grouping (e.g., 'fcst_lag').
+  - `param group_filter`: Optional; a range or list of values to filter groups (e.g., range(1, 14))
 - **Returns**: A pandas DataFrame summarizing the calculated metric for each prediction column and the baseline, structured with models as rows and the unique values of `group_col` as columns.
 
 ---

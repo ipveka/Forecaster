@@ -11,6 +11,12 @@ from sklearn.linear_model import LinearRegression
 from lightgbm import LGBMRegressor
 from sklearn.preprocessing import LabelEncoder
 
+# Options
+warnings.filterwarnings("ignore", category=DeprecationWarning)
+warnings.filterwarnings("ignore", category=UserWarning)
+warnings.simplefilter(action='ignore', category=pd.errors.PerformanceWarning)
+pd.options.mode.chained_assignment = None
+
 # Create Baselines class
 class CreateBaselines:
     # Init

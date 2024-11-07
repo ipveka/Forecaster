@@ -11,6 +11,12 @@ from sklearn.linear_model import LinearRegression
 from lightgbm import LGBMRegressor
 from sklearn.preprocessing import LabelEncoder
 
+# Options
+warnings.filterwarnings("ignore", category=DeprecationWarning)
+warnings.filterwarnings("ignore", category=UserWarning)
+warnings.simplefilter(action='ignore', category=pd.errors.PerformanceWarning)
+pd.options.mode.chained_assignment = None
+
 # Feature engineering class
 class FeatureEngineering:
     # Init
@@ -18,9 +24,9 @@ class FeatureEngineering:
         pass
 
     # Prepare data
-    def run_feature_engineering(self, df, group_cols, date_col, target, horizon, freq,
-                            window_sizes=(4, 13), lags=(4, 13), n_clusters=10,
-                            train_weight_type='linear'):
+    def run_feature_engineering(self, df, group_cols, date_col, target, freq,
+                                window_sizes=(4, 13), lags=(4, 13), fill_lags=False,
+                                n_clusters=10):
         """
         Main function to prepare the data by calling all internal functions in order.
 
@@ -29,12 +35,11 @@ class FeatureEngineering:
         group_cols (list): Columns to group the data
         date_col (str): Column containing dates
         target (str): Target variable
-        horizon (int): Forecasting horizon
         freq (str): Frequency of the data
         window_sizes (tuple): Window sizes for stats
         lags (tuple): Lag values for creating lag features
+        fill_lags (bool): Whether to fill forward lags
         n_clusters (int): Number of groups for quantile clustering
-        train_weight_type (str): Type of weighting for train weights
 
         Returns:
         pd.DataFrame: Prepared DataFrame
@@ -64,7 +69,10 @@ class FeatureEngineering:
         print("Added periods feature.")
 
         # Find numeric columns
-        signal_cols = [col for col in df.select_dtypes(include=['float64']).columns if "feature_periods" not in col]
+        signal_cols = [
+            col for col in df.select_dtypes(include=['float64']).columns
+            if "feature_periods" not in col and "weeks_until" not in col and "months_until" not in col
+        ]
         print(f"Identified signal columns: {signal_cols}")
 
         # Add MA features
@@ -76,7 +84,7 @@ class FeatureEngineering:
         print("Added moving statistics.")
 
         # Add lag features if any feature columns are found
-        df = self.create_lag_features(df, group_cols, date_col, signal_cols, lags, horizon)
+        df = self.create_lag_features(df, group_cols, date_col, signal_cols, lags, fill_lags)
         print("Added lag features.")
 
         # Add coefficient of variance for target
@@ -92,7 +100,7 @@ class FeatureEngineering:
         print("Added history clusters.")
 
         # Add train weights
-        df = self.create_train_weights(df, group_cols)
+        df = self.create_train_weights(df, group_cols, feature_periods_col='feature_periods', train_weight_type='linear')
         print("Added train weights based on the specified weighting type.")
 
         # Add forecast lag numbers
@@ -100,7 +108,7 @@ class FeatureEngineering:
         print("Added forecast lag numbers.")
 
         # Final message and return
-        print("Feature engineering completed. Returning prepared DataFrame.")
+        print("Feature engineering completed.")
         return df
 
     # Create encoded features
@@ -215,10 +223,12 @@ class FeatureEngineering:
         df['feature_month'] = df[date_col].dt.month
 
         # Create weekly features if specified
-        if freq == 'W':
+        if freq.startswith('W-') or freq == 'W':
             df['feature_week'] = df[date_col].dt.isocalendar().week.astype(int)
-        elif freq != 'M':
-            raise ValueError("Frequency must be either 'W' for weekly or 'M' for monthly.")
+        elif freq == 'M':
+            df['feature_month'] = df[date_col].dt.month
+        else:
+            raise ValueError("Frequency must be either 'W', a specific weekday like 'W-MON', or 'M' for monthly.")
 
         # Calculate next quarter end dates using pandas built-in function
         df['next_quarter_end'] = df[date_col] + pd.offsets.QuarterEnd(0)
@@ -231,20 +241,25 @@ class FeatureEngineering:
         mask = df[date_col].dt.is_year_end
         df.loc[mask, 'next_year_end'] += pd.DateOffset(years=1)
 
-        # Calculate weeks until next end of quarter/year using vectorized operations
-        df['feature_weeks_until_next_end_of_quarter'] = ((df['next_quarter_end'] - df[date_col]).dt.days / 7).astype(int)
-        df['feature_weeks_until_end_of_year'] = ((df['next_year_end'] - df[date_col]).dt.days / 7).astype(int)
+        # Calculate weeks until next end of quarter/year as floats
+        df['feature_weeks_until_next_end_of_quarter'] = (
+            (df['next_quarter_end'] - df[date_col]).dt.days / 7
+        ).astype(float)
 
-        # Calculate months until next end of quarter/year more accurately
+        df['feature_weeks_until_end_of_year'] = (
+            (df['next_year_end'] - df[date_col]).dt.days / 7
+        ).astype(float)
+
+        # Calculate months until next end of quarter/year as floats
         df['feature_months_until_next_end_of_quarter'] = (
-            (df['next_quarter_end'].dt.year - df[date_col].dt.year) * 12 +
-            df['next_quarter_end'].dt.month - df[date_col].dt.month
-        )
+            ((df['next_quarter_end'].dt.year - df[date_col].dt.year) * 12 +
+            df['next_quarter_end'].dt.month - df[date_col].dt.month)
+        ).astype(float)
 
         df['feature_months_until_end_of_year'] = (
-            (df['next_year_end'].dt.year - df[date_col].dt.year) * 12 +
-            df['next_year_end'].dt.month - df[date_col].dt.month
-        )
+            ((df['next_year_end'].dt.year - df[date_col].dt.year) * 12 +
+            df['next_year_end'].dt.month - df[date_col].dt.month)
+        ).astype(float)
 
         # Drop intermediate columns
         df = df.drop(['next_quarter_end', 'next_year_end'], axis=1)
@@ -341,39 +356,30 @@ class FeatureEngineering:
         return df_copy
 
     # Create lag features
-    def create_lag_features(self, df, group_columns, date_col, signal_columns, lags, forecast_window):
+    def create_lag_features(self, df, group_columns, date_col, signal_columns, lags, fill_lags):
         """
-        Create lag features for signal columns within each group, ensuring no data leakage for future forecasts,
-        and fill forward the last known value only for lag feature columns.
-
-        Parameters:
-        df (pd.DataFrame): Input DataFrame with signal columns and group columns.
-        group_columns (list): List of columns to group by (e.g., ['client', 'warehouse']).
-        date_col (str): The name of the date column used for sorting within each group.
-        signal_columns (list): List of signal columns for which to create lag features (e.g., ['filled_sales', 'filled_price']).
-        lags (list): List of lag values to calculate (e.g., [1, 2, ..., 26]).
-        forecast_window (int): The forecasting window for which to prevent leakage (e.g., 13 for 13 weeks).
-
-        Returns:
-        pd.DataFrame: DataFrame with additional columns for lag features.
+        Create lag features for signal columns within each group, ensuring no data leakage for future forecasts
+        by setting lags within the forecast window to None and limiting lag depth within the test set.
         """
-        # Ensure group_columns is a list
+        # Copy the input DataFrame
+        df_copy = df.copy()
+        
+        # Ensure group_columns and signal_columns are lists
         if isinstance(group_columns, str):
             group_columns = [group_columns]
         elif not isinstance(group_columns, list):
             raise ValueError("group_columns must be a list or a string.")
-        
-        # Ensure signal_columns is a list
+            
         if isinstance(signal_columns, str):
-            group_columns = [signal_columns]
+            signal_columns = [signal_columns]
         elif not isinstance(signal_columns, list):
             raise ValueError("signal_columns must be a list or a string.")
-        
+
         # Ensure the date column is in datetime format
-        df[date_col] = pd.to_datetime(df[date_col])
+        df_copy[date_col] = pd.to_datetime(df_copy[date_col])
 
         # Sort the DataFrame by group columns and date column
-        df = df.sort_values(by=group_columns + [date_col])
+        df_copy = df_copy.sort_values(by=group_columns + [date_col])
 
         # Create lag features for each signal column
         lag_feature_columns = []
@@ -382,29 +388,37 @@ class FeatureEngineering:
                 # Define the new feature column name
                 lag_feature_column = f'feature_{signal_column}_lag_{lag}'
                 lag_feature_columns.append(lag_feature_column)
-
+                
                 # Create lag feature by shifting the signal column within each group
-                df[lag_feature_column] = df.groupby(group_columns)[signal_column].shift(lag)
+                df_copy[lag_feature_column] = df_copy.groupby(group_columns)[signal_column].shift(lag)
+        
+        # Initialize row_num column with NaN for all rows
+        df_copy['row_num'] = float('nan')
+    
+        # Assign sequential row numbers for 'test' rows within each group
+        for name, group_df in df_copy.groupby(group_columns):
+            # Create mask for 'test' rows in current group
+            test_mask = group_df['sample'] == 'test'
+            # Get the indices where test_mask is True
+            test_indices = group_df.index[test_mask]
+            # Assign sequential numbers (0, 1, 2, ...) to those indices
+            df_copy.loc[test_indices, 'row_num'] = range(len(test_indices))
 
-        # Create a row number within each group
-        df['row_num'] = df.groupby(group_columns).cumcount()
+        # Remove lag values that exceed the available history in 'test' rows
+        for lag in lags:
+            for signal_column in signal_columns:
+                lag_feature_column = f'feature_{signal_column}_lag_{lag}'
+                # Set lag feature to None if lag > row_num in the test set
+                df_copy.loc[(df['sample'] == 'test') & (df_copy['row_num'] > lag), lag_feature_column] = None
 
-        # Identify the rows within the forecast window
-        forecast_rows = df['row_num'] >= (len(df) - forecast_window)
-
-        # For future rows (within the forecasting window), ensure no data leakage by clearing lagged values
-        df.loc[forecast_rows, lag_feature_columns] = None
-
-        # Fill forward the last known value for each group, only for lag feature columns
-        df[lag_feature_columns] = (
-            df.groupby(group_columns)[lag_feature_columns]
-            .ffill()
-        )
+        # Fill forward the last known value for lags
+        if fill_lags:
+            df_copy[lag_feature_columns] = df_copy.groupby(group_columns)[lag_feature_columns].ffill()
 
         # Drop the temporary row_num column
-        df = df.drop(columns=['row_num'])
-
-        return df
+        df_copy = df_copy.drop(columns=['row_num'])
+        
+        return df_copy
 
     # Create coefficient of variance
     def create_cov(self, df, group_columns, value_columns):
@@ -457,10 +471,10 @@ class FeatureEngineering:
 
             # Handle cases where mean = 0 to avoid division by zero
             group_stats[cov_column] = group_stats['std'] / group_stats['mean']
-            group_stats[cov_column] = group_stats[cov_column].fillna(0)  # Fill NaN results with 0
+            group_stats[cov_column] = group_stats[cov_column].fillna(0)
 
             # Drop unnecessary columns 'mean' and 'std' after calculation
-            group_stats = group_stats.drop(columns=['mean', 'std'], errors='ignore')  # Avoid KeyErrors
+            group_stats = group_stats.drop(columns=['mean', 'std'], errors='ignore')
 
             # Merge the CV back into the original DataFrame (result), keeping all original rows
             result = result.merge(group_stats[group_columns + [cov_column]], on=group_columns, how='left')
@@ -468,15 +482,15 @@ class FeatureEngineering:
         return result
 
     # Create combinations
-    def create_distinct_combinations(self, df, lower_level_group, group_columns):
+    def create_distinct_combinations(self, df, group_columns, lower_level_group):
         """
-        For each combination of the lower-level group (e.g., 'product') with other group columns
-        (e.g., 'client', 'warehouse', 'cutoff'), calculate the number of distinct values.
+        For each combination of the lower-level group (e.g., 'product_number') with other group columns
+        (e.g., 'reporterhq_id'), calculate the number of distinct values.
 
         Parameters:
         df (pd.DataFrame): Input DataFrame containing the group columns.
-        lower_level_group (str): The lower-level group column (e.g., 'product').
-        group_columns (list): List of higher-level group columns (e.g., ['client', 'warehouse', 'cutoff']).
+        group_columns (str or list): List of higher-level group columns (e.g., ['reporterhq_id']) or a single string.
+        lower_level_group (str): The lower-level group column (e.g., 'product_number').
 
         Returns:
         pd.DataFrame: DataFrame with new columns for each combination's distinct counts.
@@ -484,32 +498,39 @@ class FeatureEngineering:
         # Copy the input DataFrame
         result = df.copy()
 
-        # Ensure group_columns is a list
+        # Ensure group_columns is a list of strings
         if isinstance(group_columns, str):
             group_columns = [group_columns]
-        elif not isinstance(group_columns, list):
-            raise ValueError("group_columns must be a list or a string.")
+        elif not isinstance(group_columns, list) or not all(isinstance(col, str) for col in group_columns):
+            raise ValueError("group_columns must be a list of strings or a single string.")
 
-        # Loop by group columns
+        # Remove lower_level_group from group_columns if present
+        group_columns = [col for col in group_columns if col != lower_level_group]
+
+        # Loop through each remaining group column
         for group_col in group_columns:
-            # Skip the lower_level_group if it is in group_columns
-            if group_col == lower_level_group:
-                continue
-
             # Create a new column name for this combination
-            new_column_name = f'feature_distinct_{lower_level_group}_{group_col}'
+            cluster_column = f'feature_distinct_{lower_level_group}_{group_col}'
 
             # Drop duplicates based on the lower-level group and the current group column
             distinct_combinations = df.drop_duplicates(subset=[lower_level_group, group_col])
 
             # Count the number of distinct values for each lower-level group
-            combination_counts = distinct_combinations.groupby(lower_level_group)[group_col].nunique().reset_index(name=new_column_name)
+            combination_counts = (
+                distinct_combinations
+                .groupby(lower_level_group)[group_col]  # Ensure this is a single column, not a list
+                .nunique()
+                .reset_index(name=cluster_column)
+            )
 
             # Ensure the count column is of integer type
-            combination_counts[new_column_name] = combination_counts[new_column_name].astype(int)
+            combination_counts[cluster_column] = combination_counts[cluster_column].astype(int)
 
-            # Merge the distinct count back into the original DataFrame
+            # Merge the distinct count back into the original DataFrame on the lower level group
             result = result.merge(combination_counts, on=lower_level_group, how='left')
+
+            # Ensure the cluster column in the result DataFrame is an integer type
+            result[cluster_column] = result[cluster_column].fillna(0).astype(int)
 
         return result
 
@@ -562,6 +583,9 @@ class FeatureEngineering:
             # Merge the clusters back into the original DataFrame (result), keeping all original rows
             result = result.merge(avg_values[group_columns + [cluster_column]], on=group_columns, how='left')
 
+            # Ensure the cluster column in the result DataFrame is an integer type
+            result[cluster_column] = result[cluster_column].fillna(0).astype(int)
+
         return result
 
     # Create history clusters
@@ -613,6 +637,9 @@ class FeatureEngineering:
             # Merge the clusters back into the original DataFrame (result), keeping all original rows
             result = result.merge(max_values[group_columns + [cluster_column]], on=group_columns, how='left')
 
+            # Ensure the cluster column in the result DataFrame is an integer type
+            result[cluster_column] = result[cluster_column].fillna(0).astype(int)
+
         return result
 
     # Create intermittence clusters
@@ -662,22 +689,30 @@ class FeatureEngineering:
 
         # Filter only for rows where sample is 'train'
         train_data = df[df['sample'] == 'train']
-
+        
+        # Loop by value column
         for value_column in value_columns:
             # Calculate intermittence for each group for the current value column
-            intermittence_values = train_data.groupby(group_columns).apply(lambda group: calculate_intermittence(group, value_column)).reset_index(name=f'intermittence_{value_column}')
+            intermittence_values = train_data.groupby(group_columns).apply(
+                lambda group: calculate_intermittence(group, value_column)
+            ).reset_index(name=f'intermittence_{value_column}')
+
+            # Create new name for intermittence cluster
+            cluster_name = f'feature_intermittence_{value_column}_cluster'
 
             # Create quantile clusters based on the intermittence for the current value column
-            intermittence_values[f'feature_intermittence_{value_column}_cluster'] = pd.qcut(
+            intermittence_values[cluster_name] = pd.qcut(
                 intermittence_values[f'intermittence_{value_column}'], q=n_groups,
                 duplicates='drop', labels=False) + 1
 
             # Ensure that the cluster column is of integer type
-            intermittence_values[f'feature_intermittence_{value_column}_cluster'] = intermittence_values[f'feature_intermittence_{value_column}_cluster'].fillna(0).astype(int)
+            intermittence_values[cluster_name] = intermittence_values[cluster_name].fillna(0).astype(int)
 
             # Merge the intermittence clusters back into the original DataFrame (result), keeping all original rows
-            result = result.merge(intermittence_values[group_columns + [f'feature_intermittence_{value_column}_cluster']],
-                                  on=group_columns, how='left')
+            result = result.merge(intermittence_values[group_columns + [cluster_name]],on=group_columns, how='left')
+
+            # Ensure the cluster column in the result DataFrame is an integer type
+            result[cluster_name] = result[cluster_name].fillna(0).astype(int)
 
         return result
 
@@ -782,6 +817,6 @@ class FeatureEngineering:
 
         # Apply function to each group and cast to integer after filling NaN
         df = df.groupby(group_columns, group_keys=False).apply(apply_fcst_lag)
-        df['fcst_lag'] = df['fcst_lag'].astype('Int64')
+        df['fcst_lag'] = df['fcst_lag'].fillna(0).astype(int)
 
         return df

@@ -21,11 +21,15 @@ from sklearn.model_selection import RandomizedSearchCV
 from sklearn.model_selection import GridSearchCV
 from sklearn.feature_selection import mutual_info_regression
 
+# Models
+from lightgbm import LGBMRegressor
+from sklearn.ensemble import RandomForestRegressor
+from sklearn.ensemble import GradientBoostingRegressor
+from sklearn.ensemble import AdaBoostRegressor
+from sklearn.linear_model import LinearRegression
+
 # Statsmodels
 from statsmodels.tsa.seasonal import seasonal_decompose
-
-# Forecaster
-from lightgbm import LGBMRegressor
 
 # Multiprocessing
 from concurrent.futures import ProcessPoolExecutor
@@ -41,6 +45,69 @@ from math import ceil
 
 # Cuda
 import torch
+
+# Options
+warnings.filterwarnings("ignore", category=DeprecationWarning)
+warnings.filterwarnings("ignore", category=UserWarning)
+warnings.simplefilter(action='ignore', category=pd.errors.PerformanceWarning)
+pd.options.mode.chained_assignment = None
+
+# Define estimator map
+estimator_map = {
+    'LGBM': LGBMRegressor(n_jobs=-1, objective='regression', random_state=42, verbose=-1),
+    'RF': RandomForestRegressor(random_state=42, verbose=-1),
+    'GBM': GradientBoostingRegressor(random_state=42, verbose=-1),
+    'ADA': AdaBoostRegressor(random_state=42),
+    'LR': LinearRegression()
+}
+
+# Define parameter dictionary
+hyperparam_dictionary = {
+    'LGBM': {
+        'learning_rate': [0.01, 0.05, 0.1],
+        'n_estimators': [500, 1000, 2000],
+        'num_leaves': [15, 31, 64],
+        'max_depth': [4, 8, 12],
+        'subsample': [0.6, 0.8, 1.0],
+        'colsample_bytree': [0.6, 0.8, 1.0],
+        'reg_alpha': [0.0, 0.1, 0.5],
+        'reg_lambda': [0.0, 0.1, 0.5]
+    },
+    'RF': {
+        'n_estimators': [100, 500, 1000, 1500],
+        'max_depth': [8, 16, 32, 64, None],
+        'min_samples_split': [2, 5, 10],
+        'min_samples_leaf': [1, 2, 4],
+        'max_features': ['sqrt', 'log2', None],
+        'criterion': ['squared_error', 'absolute_error'],
+        'bootstrap': [True, False],
+        'max_samples': [0.5, 0.7, 0.9]
+    },
+    'GBM': {
+        'n_estimators': [100, 300, 500, 1000],
+        'learning_rate': [0.01, 0.05, 0.1, 0.2],
+        'max_depth': [3, 4, 6, 8],
+        'min_samples_split': [2, 5, 10],
+        'min_samples_leaf': [1, 2, 4],
+        'subsample': [0.6, 0.8, 1.0],
+        'max_features': ['sqrt', 'log2', None],
+        'validation_fraction': [0.1, 0.2]
+    },
+    'ADA': {
+        'n_estimators': [50, 100, 200, 500],
+        'learning_rate': [0.01, 0.05, 0.1, 0.3],
+        'algorithm': ['SAMME', 'SAMME.R'],
+        'random_state': [42]
+    },
+    'LR': {
+        'alpha': [0.001, 0.01, 0.1, 1.0, 10, 100, 500],
+        'fit_intercept': [True, False],
+        'solver': ['svd', 'cholesky', 'lsqr', 'sag'],
+        'max_iter': [1000],
+        'normalize': [True, False],
+        'tol': [1e-4, 1e-3]
+    }
+}
 
 # Forecaster class
 class Forecaster:
@@ -78,7 +145,7 @@ class Forecaster:
                 group_data = self.df[self.df[group_cols].eq(group).all(axis=1)]
 
                 # Check for sufficient data points for decomposition
-                if len(group_data) < 2:  # Change this threshold as needed
+                if len(group_data) < 2:
                     continue
 
                 # Decompose the time series
@@ -96,9 +163,9 @@ class Forecaster:
                 self.df.loc[outlier_mask, column] = np.clip(self.df.loc[outlier_mask, column], lower_bounds, upper_bounds)
 
         else:
-            # Calculate lower and upper bounds for each group using transform
-            lower_bounds = self.df.groupby(group_cols)[column].transform(lambda x: x.quantile(lower_quantile))
-            upper_bounds = self.df.groupby(group_cols)[column].transform(lambda x: x.quantile(upper_quantile))
+            # Calculate lower and upper bounds for each group, excluding NaNs
+            lower_bounds = self.df.groupby(group_cols)[column].transform(lambda x: x.dropna().quantile(lower_quantile))
+            upper_bounds = self.df.groupby(group_cols)[column].transform(lambda x: x.dropna().quantile(upper_quantile))
 
             # Cap the outliers using vectorized operations
             self.df[column] = np.clip(self.df[column], lower_bounds, upper_bounds)
@@ -200,10 +267,19 @@ class Forecaster:
             X_clean = group[numeric_features]
             y_clean = group[y.name]
 
-            # Check if the lengths of X_clean and y_clean are the same
-            if len(X_clean) == len(y_clean) and len(X_clean) > 0:
-                return mutual_info_regression(X_clean, y_clean)
-            return np.zeros(len(numeric_features))
+            # Check if the lengths of X_clean and y_clean are the same and if they have at least 2 samples
+            if len(X_clean) == len(y_clean) and len(X_clean) > 1:
+                try:
+                    return mutual_info_regression(X_clean, y_clean)
+                except ValueError as e:
+                    if "Expected n_neighbors < n_samples_fit" in str(e):
+                        # If the error is due to n_neighbors being greater than n_samples_fit,
+                        # set n_neighbors to 1 less than the number of samples
+                        return mutual_info_regression(X_clean, y_clean, n_neighbors=len(X_clean) - 1)
+                    else:
+                        raise e
+            else:
+                return np.zeros(len(numeric_features))
 
         # Compute MI scores for each group
         grouped_mi_scores = data.groupby(group_cols).apply(compute_mi_scores)
@@ -216,151 +292,122 @@ class Forecaster:
 
         # Select the n_best_features
         best_features = feature_scores.nlargest(n_best_features, 'mi_score')['feature'].tolist()
-
         return best_features
 
-    # Load default params
-    def load_default_params_and_distributions(self):
-        """
-        Load default parameters and hyperparameter distributions for the model.
-
-        Returns:
-        tuple: A tuple containing two dictionaries:
-            - The first dictionary contains the default model parameters.
-            - The second dictionary contains the default hyperparameter distributions for tuning.
-        """
-        default_params = {
-            'objective': 'regression',
-            'metric': 'rmse',
-            'boosting_type': 'gbdt',
-            'n_estimators': 2000,
-            'learning_rate': 0.01,
-            'num_leaves': 32,
-            'max_depth': 8,
-            'verbose': -1
-        }
-
-        default_param_distributions = {
-            # Core Parameters
-            'objective': ['regression'],
-            'boosting_type': ['gbdt', 'dart'],
-            'metric': ['rmse', 'mae'],
-            'n_estimators': [1000, 2000, 3000],
-            'learning_rate': [0.01, 0.05, 0.10],
-            'num_leaves': [16, 31, 48],
-            'max_depth': [4, 8, 12],
-            # Control Overfitting Parameters
-            'min_data_in_leaf': [20, 50, 80],
-            'feature_fraction': [0.7, 0.8, 0.9],
-            'bagging_fraction': [0.7, 0.8, 0.9],
-            'bagging_freq': [1, 3, 5, 9],
-            # Regularization Parameters
-            'lambda_l1': [0.0, 0.4, 1.0],
-            'lambda_l2': [0.0, 0.4, 1.0],
-            'min_gain_to_split': [0.0, 0.1, 0.2],
-            'min_child_weight': [1e-3, 1e-2, 1e-1]
-        }
-
-        return default_params, default_param_distributions
-
     # Tune hyperparameters
-    def _tune_hyperparameters(self, X_train, y_train, param_distributions, search_method='halving', n_splits=4,
-                              scoring='neg_root_mean_squared_error', n_iter=50, sample_weight=None):
+    def _tune_hyperparameters(self, X_train, y_train, model='LGBM', params=None, param_distributions=None, search_method='halving', n_splits=4,
+                              scoring='neg_root_mean_squared_error', n_iter=30, sample_weight=None):
         """
         Tune hyperparameters using the specified search method.
-
-        :param X_train: Training feature data
-        :param y_train: Training target data
-        :param param_distributions: Dictionary of hyperparameter search space
-        :param search_method: The search method to use ('grid', 'random', or 'halving')
-        :param n_splits: Number of splits for TimeSeriesSplit (cross-validation)
-        :param scoring: Scoring metric to use for optimization
-        :param n_iter: Number of iterations for RandomizedSearchCV and HalvingRandomSearchCV
-        :param sample_weight: Optional sample weights for training
-        :return: The best estimator (model) found by the search and the best parameters
         """
-        # Set up time series cross-validation
+        # Set up cross-validation
         tscv = TimeSeriesSplit(n_splits=n_splits)
 
-        # Set the device for LGBMRegressor
-        if torch.cuda.is_available():
-            base_model = LGBMRegressor(device_type='gpu', verbose=-1)
-        else:
-            base_model = LGBMRegressor(verbose=-1)
+        # Select the estimator and parameter distribution
+        base_model = params[model]
+        param_dist = param_distributions[model]
 
-        # Choose the appropriate search method
+        # Print the selected base model and parameter distribution
+        print("Selected Base Model:", base_model)
+        print("Parameter Distribution:", param_dist)
+
+        # Choose the search method
         if search_method == 'grid':
             search = GridSearchCV(
                 estimator=base_model,
-                param_grid=param_distributions,
+                param_grid=param_dist,
                 cv=tscv,
                 scoring=scoring,
+                error_score='raise',
                 n_jobs=-1,
                 verbose=1
             )
         elif search_method == 'random':
             search = RandomizedSearchCV(
                 estimator=base_model,
-                param_distributions=param_distributions,
+                param_distributions=param_dist,
                 n_iter=n_iter,
                 cv=tscv,
                 scoring=scoring,
+                error_score='raise',
                 n_jobs=-1,
                 verbose=1,
-                random_state=42
+                random_state=42,
             )
         elif search_method == 'halving':
             search = HalvingRandomSearchCV(
                 estimator=base_model,
-                param_distributions=param_distributions,
-                resource='n_samples',
-                min_resources=250, 
+                param_distributions=param_dist,
                 max_resources=3000,
-                aggressive_elimination=True,
-                error_score='raise',
+                aggressive_elimination=False,
                 return_train_score=False,
                 refit=True,
                 cv=tscv,
                 factor=3,
                 scoring=scoring,
+                error_score='raise',
                 n_jobs=-1,
-                verbose=0,
+                verbose=1,
                 random_state=42
             )
         else:
             raise ValueError("Invalid search_method. Choose 'grid', 'random', or 'halving'.")
 
-        # Perform the hyperparameter search, passing sample weights if provided
+        # Perform the search, including sample weights if provided
         if sample_weight is not None:
             search.fit(X_train, y_train, sample_weight=sample_weight)
         else:
             search.fit(X_train, y_train)
 
         return search.best_estimator_, search.best_params_
+    
+
+    # Count and report NA
+    def calculate_nan_inf_percentage(self, X, y):
+        # Total number of rows
+        total_rows_X = X.shape[0]
+        total_rows_y = y.shape[0]
+
+        # Check for NaNs
+        nan_rows_X = np.isnan(X).any(axis=1)
+        nan_rows_y = np.isnan(y)
+        nan_count_X = np.sum(nan_rows_X)
+        nan_count_y = np.sum(nan_rows_y)
+
+        # Check for infinite values
+        inf_rows_X = np.isinf(X).any(axis=1)
+        inf_rows_y = np.isinf(y)
+        inf_count_X = np.sum(inf_rows_X)
+        inf_count_y = np.sum(inf_rows_y)
+
+        # Calculate percentages
+        nan_percentage_X = (nan_count_X / total_rows_X) * 100
+        nan_percentage_y = (nan_count_y / total_rows_y) * 100
+        inf_percentage_X = (inf_count_X / total_rows_X) * 100
+        inf_percentage_y = (inf_count_y / total_rows_y) * 100
+
+        # Print results
+        print(f"NaNs in X_train: {nan_percentage_X:.2f}% of rows contain NaNs")
+        print(f"NaNs in y_train: {nan_percentage_y:.2f}% of rows contain NaNs")
+        print(f"Infinite values in X_train: {inf_percentage_X:.2f}% of rows contain infinite values")
+        print(f"Infinite values in y_train: {inf_percentage_y:.2f}% of rows contain infinite values")
 
     # Train model
     def train_model(self, df, cutoff, features, params, training_group, training_group_val, target_col,
                     use_weights=False, tune_hyperparameters=False, search_method='halving',
-                    param_distributions=None, scoring='neg_root_mean_squared_error'):
+                    param_distributions=None, scoring='neg_root_mean_squared_error', n_iter=30, 
+                    model='LGBM'):
         """
         Train the model for a specific cutoff and training group, and optionally perform hyperparameter tuning.
-
-        :param df: Input data
-        :param cutoff: The cutoff value for splitting the data
-        :param features: List of feature names to use in the model
-        :param params: Dictionary of model parameters to use if tuning is not performed
-        :param training_group_val: The value of the training group to filter the data by
-        :param target_col: The column to use as the target for prediction
-        :param training_group: The column name to use for training groups
-        :param use_weights: Whether to use the 'weight' column during training
-        :param tune_hyperparameters: If True, will perform hyperparameter tuning
-        :param search_method: The search method to use for hyperparameter tuning ('grid', 'random', or 'halving')
-        :param param_distributions: Hyperparameter search space to be used if tuning is enabled
-        :param scoring: Scoring metric to use for optimization
-        :return: Modified DataFrame with predictions for the training and test sets
         """
         # Prepare the data
         X_train, y_train, X_test, test_idx, train_idx = self._prepare_data(df, features, target_col)
+
+        # Report NA and Infs
+        self.calculate_nan_inf_percentage(X_train, y_train)
+
+        # Fill NA in y
+        y_train = y_train.fillna(0)
 
         # Extract sample weights if use_weights is enabled
         if use_weights:
@@ -369,19 +416,18 @@ class Forecaster:
             train_weights = None
 
         # Perform hyperparameter tuning if enabled
-        if tune_hyperparameters and param_distributions:
+        if tune_hyperparameters:
             print(f"Tuning hyperparameters for cutoff: {cutoff}, training group: {training_group_val} ({training_group})")
-            model, best_params = self._tune_hyperparameters(X_train, y_train, param_distributions,
-                                                            search_method=search_method, scoring=scoring,
-                                                            sample_weight=train_weights)
+            # Tune hyperparams
+            model, best_params = self._tune_hyperparameters(
+                X_train, y_train, model=model, params=params, param_distributions=param_distributions,
+                search_method=search_method, scoring=scoring, n_iter=n_iter,
+                sample_weight=train_weights)
             self.models[(cutoff, training_group_val)] = model
             self.best_hyperparams[(cutoff, training_group_val)] = best_params
         else:
-            # Check if CUDA is available
-            if torch.cuda.is_available():
-                model = LGBMRegressor(device_type='gpu', **params)
-            else:
-                model = LGBMRegressor(**params)
+            # Use specified model from estimator_map
+            model = params[model]
 
         # Fit the model with or without sample weights
         model.fit(X_train, y_train, sample_weight=train_weights)
@@ -389,9 +435,10 @@ class Forecaster:
         # Store model
         self.models[(cutoff, training_group_val)] = model
 
-        # Store feature importances
-        importances = model.feature_importances_
-        self.feature_importances[(cutoff, training_group_val)] = importances
+        # Store feature importances if available
+        if hasattr(model, "feature_importances_"):
+            importances = model.feature_importances_
+            self.feature_importances[(cutoff, training_group_val)] = importances
 
         # Make predictions
         predictions_train = model.predict(X_train)
@@ -401,15 +448,14 @@ class Forecaster:
         df.loc[train_idx, 'prediction'] = predictions_train
         df.loc[test_idx, 'prediction'] = predictions_test
 
-        # Return the modified DataFrame
         return df
 
     # Process cutoff function
-    def process_cutoff(self, cutoff, features, params, target_col, training_group,
-                   training_group_values, tune_hyperparameters, search_method,
-                   param_distributions, scoring, best_features, n_best_features,
-                   group_cols, baseline_col, use_guardrail, guardrail_limit,
-                   use_weights, current_cutoff_idx, total_cutoffs):
+    def process_cutoff(self, cutoff, features, params, target_col, training_group, model,
+                       training_group_values, tune_hyperparameters, search_method,
+                       param_distributions, scoring, n_iter, best_features, n_best_features,
+                       group_cols, baseline_col, use_guardrail, guardrail_limit,
+                       use_weights, current_cutoff_idx, total_cutoffs):
         """
         Process cutoff function with progress updates
         """
@@ -480,7 +526,7 @@ class Forecaster:
                 # Train model will save results
                 try:
                     cutoff_df_results = self.train_model(cutoff_df_tg, cutoff, features_to_use, params, training_group, training_group_val, target_col,
-                                                        use_weights, tune_hyperparameters, search_method, param_distributions, scoring)
+                                                         use_weights, tune_hyperparameters, search_method, param_distributions, scoring, n_iter, model)
                 except Exception as e:
                     print(f"Error occurred while training model for cutoff {cutoff}, training group {training_group_val}: {str(e)}")
                     raise
@@ -509,9 +555,6 @@ class Forecaster:
             # Concatenate all results
             results_cutoff = pd.concat(results_cutoff, axis=0, ignore_index=True)
 
-            # Print dimensions
-            print(f"Dimensions of results dataframe: {results_cutoff.shape}")
-
             return results_cutoff
 
         except Exception as e:
@@ -524,32 +567,34 @@ class Forecaster:
 
     # Run backtesting
     def run_backtesting(self, group_cols=None, features=None, params=None, training_group='training_group',
-                        target_col='sales', tune_hyperparameters=False, search_method='halving',
-                        param_distributions=None, scoring='neg_mean_squared_log_error', best_features=None,
-                        n_best_features=15, remove_outliers=False, outlier_column=None,
-                        lower_quantile=0.025, upper_quantile=0.975, ts_decomposition=False, baseline_col=None,
+                        target_col='sales', model='LGBM', tune_hyperparameters=False, search_method='halving',
+                        param_distributions=None, scoring='neg_mean_squared_log_error', n_iter=30, best_features=None,
+                        n_best_features=15, remove_outliers=False, outlier_column=None, lower_quantile=0.025, 
+                        upper_quantile=0.975, ts_decomposition=False, baseline_col=None,
                         use_guardrail=False, guardrail_limit=2.5, use_weights=False,
                         use_parallel=True, num_cpus=None):
         """
         Train and predict for all cutoff values and training groups in the dataset.
         """
+        # Print init
+        print("Starting backtesting")
         try:
             # Validate input
             if features is None:
                 raise ValueError("Features list cannot be None. Pass columns with 'feature' in the name.")
 
+            # Validate group columns
             if group_cols is None:
                 raise ValueError("group_cols cannot be None. Specify the columns used for grouping.")
 
-            # Load default parameters and distributions if not provided
-            default_params, default_param_distributions = self.load_default_params_and_distributions()
-
             # Assign default parameters
             if params is None:
-                params = default_params
+                print("User did not provide parameter dictionary, using internal method")
+                params = estimator_map
 
             if param_distributions is None:
-                param_distributions = default_param_distributions
+                print("User did not provide hyperparameter dictionary, using internal method")
+                param_distributions = hyperparam_dictionary
 
             # Remove outliers if specified
             if remove_outliers and outlier_column and group_cols:
@@ -598,15 +643,18 @@ class Forecaster:
             if use_guardrail:
                 self.df['guardrail'] = False
 
+            # Show selected model
+            print("Predictions will be generated with model:", model)
+
             # Use ProcessPoolExecutor to parallelize by cutoff if specified
             if use_parallel:
                 print(f"Running predictions in parallel with {num_cpus} cores")
                 print("----------------------------------------------------------")
                 try:
                     with ProcessPoolExecutor(max_workers=num_cpus) as executor:
-                        args_list = [(c, features, params, target_col, training_group,
+                        args_list = [(c, features, params, target_col, training_group, model,
                                       training_group_values, tune_hyperparameters, search_method,
-                                      param_distributions, scoring, best_features, n_best_features,
+                                      param_distributions, scoring, n_iter, best_features, n_best_features,
                                       group_cols, baseline_col, use_guardrail, guardrail_limit,
                                       use_weights, idx, len(cutoffs)) for idx, c in enumerate(cutoffs)]
                         results = list(executor.map(self.process_cutoff_wrapper, args_list))
@@ -616,9 +664,9 @@ class Forecaster:
             else:
                 print(f"Running predictions sequentially")
                 print("----------------------------------------------------------")
-                results = [self.process_cutoff(c, features, params, target_col, training_group,
+                results = [self.process_cutoff(c, features, params, target_col, training_group, model,
                                               training_group_values, tune_hyperparameters, search_method,
-                                              param_distributions, scoring, best_features, n_best_features,
+                                              param_distributions, scoring, n_iter, best_features, n_best_features,
                                               group_cols, baseline_col, use_guardrail, guardrail_limit,
                                               use_weights, idx, len(cutoffs)) for idx, c in enumerate(cutoffs)]
 
