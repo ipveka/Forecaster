@@ -17,7 +17,6 @@ This class is designed to facilitate the creation of various features necessary 
   - `window_sizes`: Window sizes for statistical calculations.
   - `lags`: Lag values for creating lag features.
   - `n_clusters`: Number of groups for quantile clustering.
-  - `train_weight_type`: Type of weighting for training weights.
 - **Returns**: Prepared DataFrame.
 
 ---
@@ -86,7 +85,6 @@ This class is designed to facilitate the creation of various features necessary 
   - `date_col`: The name of the date column used for sorting.
   - `signal_columns`: List of signal columns to create lag features for.
   - `lags`: List of lag values to calculate.
-  - `forecast_window`: Forecasting window to prevent leakage.
 - **Returns**: DataFrame with additional lag feature columns.
 
 ## 8. `create_cov`

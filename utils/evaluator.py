@@ -10,16 +10,7 @@ import os
 from matplotlib import pyplot as plt
 
 # Sklearn
-from sklearn.preprocessing import LabelEncoder
-from sklearn.preprocessing import MinMaxScaler
 from sklearn.metrics import mean_squared_error
-from sklearn.model_selection import train_test_split
-from sklearn.model_selection import TimeSeriesSplit
-from sklearn.experimental import enable_halving_search_cv
-from sklearn.model_selection import HalvingRandomSearchCV
-from sklearn.model_selection import RandomizedSearchCV
-from sklearn.model_selection import GridSearchCV
-from sklearn.feature_selection import mutual_info_regression
 
 # Forecaster
 from lightgbm import LGBMRegressor
@@ -38,6 +29,12 @@ from math import ceil
 
 # Cuda
 import torch
+
+# Options
+warnings.filterwarnings("ignore", category=DeprecationWarning)
+warnings.filterwarnings("ignore", category=UserWarning)
+warnings.simplefilter(action='ignore', category=pd.errors.PerformanceWarning)
+pd.options.mode.chained_assignment = None
 
 # Evaluator class
 class Evaluator:
@@ -77,7 +74,7 @@ class Evaluator:
         mask = ~np.isnan(actuals) & ~np.isnan(predictions)
         return actuals[mask], predictions[mask]
 
-    # Calculate RMSE
+    # Calculate RMSE
     def calculate_rmse(self, actuals, predictions):
         """
         Calculate Root Mean Square Error (RMSE).
@@ -89,7 +86,7 @@ class Evaluator:
         actuals, predictions = self._remove_nan(actuals, predictions)
         return np.sqrt(mean_squared_error(actuals, predictions))
 
-    # Calculate MAPE
+    # Calculate MAPE
     def calculate_mape(self, actuals, predictions):
         """
         Calculate Mean Absolute Percentage Error (MAPE).
@@ -99,9 +96,15 @@ class Evaluator:
         :return: MAPE value
         """
         actuals, predictions = self._remove_nan(actuals, predictions)
-        return np.mean(np.abs((actuals - predictions) / actuals)) * 100
-
-    # Calculate WMAPE
+        
+        # Avoid division by zero by filtering out zero values in actuals
+        non_zero_actuals = actuals != 0
+        if np.any(non_zero_actuals):
+            return np.mean(np.abs((actuals[non_zero_actuals] - predictions[non_zero_actuals]) / actuals[non_zero_actuals])) * 100
+        else:
+            return np.nan
+        
+    # Calculate WMAPE
     def calculate_wmape(self, actuals, predictions):
         """
         Calculate Weighted Mean Absolute Percentage Error (WMAPE).
@@ -111,7 +114,13 @@ class Evaluator:
         :return: WMAPE value
         """
         actuals, predictions = self._remove_nan(actuals, predictions)
-        return np.sum(np.abs(actuals - predictions)) / np.sum(actuals) * 100
+        total_actuals = np.sum(actuals)
+        
+        # Avoid division by zero by checking if total actuals sum to zero
+        if total_actuals != 0:
+            return np.sum(np.abs(actuals - predictions)) / total_actuals * 100
+        else:
+            return np.nan
 
     # Calculate MAE
     def calculate_mae(self, actuals, predictions):
@@ -125,7 +134,7 @@ class Evaluator:
         actuals, predictions = self._remove_nan(actuals, predictions)
         return np.mean(np.abs(actuals - predictions))
 
-    # Calculate custom metric
+    # Calculate custom metric
     def calculate_custom_metric(self, actuals, predictions):
         """
         Calculate the custom metric based on absolute error and overall error.
@@ -140,6 +149,8 @@ class Evaluator:
         score = abs_err + abs(err)
 
         total_objective = np.sum(actuals)
+        
+        # Avoid division by zero for custom metric
         if total_objective != 0:
             score /= total_objective
         else:
@@ -234,18 +245,24 @@ class Evaluator:
             raise ValueError(f"Unknown metric: {metric_name}")
 
     # Calculate grouped metrics
-    def calculate_grouped_metric(self, metric_name, group_col):
+    def calculate_grouped_metric(self, metric_name, group_col, group_filter=None):
         """
         Calculate the specified metric grouped by the specified column,
-        including baseline and all prediction models.
+        including baseline and all prediction models. Optionally filter 
+        groups based on a specified range or list of values.
 
         :param metric_name: The name of the metric to calculate (e.g., 'RMSE', 'MAE', etc.)
         :param group_col: The column name to group by (e.g., 'fcst_lag')
+        :param group_filter: Optional; a range or list of values to filter groups (e.g., range(1, 14))
         :return: A pandas DataFrame summarizing the metric for each prediction column and baseline by group_col
         """
         # Filter test data
         test_data = self._filter_test_data()
         actuals = test_data[self.actuals_col].values
+
+        # Apply group filter if provided
+        if group_filter is not None:
+            test_data = test_data[test_data[group_col].isin(group_filter)]
 
         # Initialize a list to hold the metric values
         metric_values = []
