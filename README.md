@@ -4,25 +4,33 @@
 
 This project uses as example data provided for the HP Supply Chain Optimization challenge at HackUPC 2023. You can see all related information here: https://www.kaggle.com/competitions/hp-supply-chain-optimization
 
+---
+
 ## Models available
 
-1. **LightGBM Regressor (LGBM)**: A gradient boosting model optimized for speed and efficiency, often used for large datasets.
-2. **Random Forest Regressor (RF)**: An ensemble method that combines multiple decision trees for robust predictions.
-3. **Gradient Boosting Regressor (GBM)**: A boosting model that builds sequential trees, each correcting the errors of the previous ones.
-4. **AdaBoost Regressor (ADA)**: A boosting technique using weak learners, typically decision trees, to improve overall model performance.
-5. **Linear Regression (LR)**: A linear model often used as a baseline; performs well with simple relationships between features and target
+- **LightGBM Regressor (LGBM)**: A gradient boosting model optimized for speed and efficiency, often used for large datasets.
+- **Random Forest Regressor (RF)**: An ensemble method that combines multiple decision trees for robust predictions.
+- **Gradient Boosting Regressor (GBM)**: A boosting model that builds sequential trees, each correcting the errors of the previous ones.
+- **AdaBoost Regressor (ADA)**: A boosting technique using weak learners, typically decision trees, to improve overall model performance.
+- **Linear Regression (LR)**: A linear model often used as a baseline; performs well with simple relationships between features and target
+
+---
 
 ## 🌟 Why Gradient Boosting models are great for Forecasting
 
 Gradient boosting machine (GBM) models are powerful tools for time series forecasting. They excel in capturing complex patterns, handling a wide range of data types, and scaling efficiently to large datasets. **LightGBM** (Light Gradient Boosting Machine) stands out as a popular GBM variant due to its focus on speed, accuracy, and efficiency. Here’s a look into why GBMs are excellent for forecasting, with a focus on what makes LightGBM especially effective.
 
+---
+
 ### 🌿 The Power of Gradient Boosting in Forecasting
 
 At a high level, gradient boosting is an **ensemble learning** technique. It combines multiple weak learners, typically decision trees, in a sequential way to build a strong, predictive model. Here’s how it works:
 
-1. **Sequential Model Improvement**: Gradient boosting builds models iteratively, each new model improving on the errors of the previous ones. This allows it to refine predictions progressively, enhancing accuracy with each step.
-2. **Focus on High-Error Instances**: By assigning higher weights to instances with larger prediction errors, GBM models excel at capturing hard-to-model data patterns, making them highly suitable for **nonlinear and seasonal relationships** often present in time series data.
-3. **Adaptability to Diverse Data**: GBMs handle various data types (continuous, categorical, and even missing data) with minimal preprocessing, adapting well to diverse real-world datasets.
+- **Sequential Model Improvement**: Gradient boosting builds models iteratively, each new model improving on the errors of the previous ones. This allows it to refine predictions progressively, enhancing accuracy with each step.
+- **Focus on High-Error Instances**: By assigning higher weights to instances with larger prediction errors, GBM models excel at capturing hard-to-model data patterns, making them highly suitable for **nonlinear and seasonal relationships** often present in time series data.
+- **Adaptability to Diverse Data**: GBMs handle various data types (continuous, categorical, and even missing data) with minimal preprocessing, adapting well to diverse real-world datasets.
+
+---
 
 ### 🌿 How LightGBM Works
 
@@ -31,6 +39,8 @@ LightGBM is a specialized, high-performance GBM variant that accelerates trainin
 - **Leaf-Wise Tree Growth**: Unlike other GBMs that grow trees level-wise, LightGBM uses **leaf-wise growth**, adding nodes to the leaf with the highest potential error reduction. This yields **deeper, more accurate trees**, optimizing model performance.
 - **Histogram-Based Learning**: To reduce computation, LightGBM bins continuous values into discrete groups, allowing it to process large datasets efficiently while still capturing important trends and patterns.
 - **Built-In Categorical Handling**: LightGBM natively handles categorical variables, such as days of the week or seasons, without the need for preprocessing (e.g., one-hot encoding), making it easier to use with time series data.
+
+---
 
 ### ⏱ Advantages of LightGBM for Time Series Forecasting
 
@@ -83,7 +93,7 @@ The project is structured around five primary classes, each responsible for a sp
    - **Smooth the target variable** to help reduce noise.
    - **Create a backtesting dataset** with varied cutoff values (train/test sets).
    - **Guarantee a full horizon** for all groups to support consistent forecasting.
-   Additionally, a function named `run_data_preparation` orchestrates all these steps, allowing users to perform comprehensive data preparation in one go.
+   - **Orchestrator** The `run_data_preparation` function orchestrates all these steps, allowing users to perform comprehensive data preparation in one go.
 
 - **`FeatureEngineering`** 🔍  
    Building on the outputs from `DataPreparation`, this class generates and refines features crucial for model performance, including:
@@ -95,7 +105,7 @@ The project is structured around five primary classes, each responsible for a sp
    - **Coefficient of variation and group combinations**, representing statistical variability and complex group interactions.
    - **Cluster-based features** derived from average target values, period since inception
    - **Training weights calculation** used in the model to give more importance to recent data
-   The `run_feature_engineering` function enables users to orchestrate all feature engineering steps in a single operation.
+   - **Orchestrator** The `run_feature_engineering` function orchestrates all feature engineering steps in a single operation.
 
 - **`CreateBaselines`** 🧩  
    This class uses the outputs from `FeatureEngineering` to establish baseline models that serve as benchmarks, enabling users to evaluate LightGBM’s improvements over simpler models. It also generates simple forecasts for numeric signals.
@@ -179,12 +189,6 @@ Root Mean Squared Error (RMSE) is a popular evaluation metric used in many Kaggl
 
 ---
 
-## Definitions
-
-- **Cutoff**: The date from which the test set begins. It is crucial for splitting the dataset into training and testing subsets. The training data consists of all observations prior to the cutoff date, while the test set includes observations on or after this date. Properly defining the cutoff helps in evaluating the model's performance on unseen data.
-
----
-
 ## ⚙️ Requirements
 
 The `requirements.txt` file lists necessary libraries, simplifying setup. Install dependencies with:
@@ -197,11 +201,9 @@ pip install -r requirements.txt
 
 ## How to Use
 
-To utilize the **LightGBM-Forecaster** project, you'll need to import the relevant classes from the `utils` folder. Each class is designed to handle specific tasks within the time series forecasting pipeline.
+To utilize the **Forecaster** project, you'll need to import the relevant classes from the `utils` folder. Each class is designed to handle specific tasks within the time series forecasting pipeline.
 
----
-
-## Importing classes
+### Importing classes
 
 You can import the necessary classes as follows:
 
@@ -213,6 +215,12 @@ from utils.forecaster import Forecaster
 from utils.evaluator import Evaluator
 from utils.auxiliar import *
 ```
+
+---
+
+## Definitions
+
+- **Cutoff**: The date from which the test set begins. It is crucial for splitting the dataset into training and testing subsets. The training data consists of all observations prior to the cutoff date, while the test set includes observations on or after this date. Properly defining the cutoff helps in evaluating the model's performance on unseen data.
 
 ---
 
