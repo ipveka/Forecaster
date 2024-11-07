@@ -22,7 +22,7 @@ Gradient boosting machine (GBM) models are powerful tools for time series foreca
 
 ---
 
-### 🌿 The Power of Gradient Boosting in Forecasting
+### 🌿 The Power of Gradient Boosting
 
 At a high level, gradient boosting is an **ensemble learning** technique. It combines multiple weak learners, typically decision trees, in a sequential way to build a strong, predictive model. Here’s how it works:
 
@@ -32,7 +32,7 @@ At a high level, gradient boosting is an **ensemble learning** technique. It com
 
 ---
 
-### 🌿 How LightGBM Works
+### 🌿 Best in class: LigthGBM from Microsoft
 
 LightGBM is a specialized, high-performance GBM variant that accelerates training and boosts efficiency without compromising accuracy. Its unique approach to tree growth and data processing makes it especially well-suited for forecasting:
 
@@ -46,20 +46,20 @@ LightGBM is a specialized, high-performance GBM variant that accelerates trainin
 
 Here’s why LightGBM is a top choice for time series forecasting:
 
-1. **Scalability for Large Datasets**  
-   LightGBM is designed to handle large, high-dimensional datasets, such as those often encountered in time series forecasting with many features (e.g., lags, trends, and seasonal variables). Its **optimized memory usage and fast training** make it ideal for production-level forecasting tasks with millions of rows.
+- **Scalability for Large Datasets**  
+LightGBM is designed to handle large, high-dimensional datasets, such as those often encountered in time series forecasting with many features (e.g., lags, trends, and seasonal variables). Its **optimized memory usage and fast training** make it ideal for production-level forecasting tasks with millions of rows.
 
-2. **Pattern and Trend Recognition**  
-   Tree-based models, like those in LightGBM, inherently capture **nonlinear relationships** and complex dependencies. This structure makes it effective in capturing time series patterns, such as seasonality and trend changes, often leading to highly accurate forecasts.
+- **Pattern and Trend Recognition**  
+Tree-based models, like those in LightGBM, inherently capture **nonlinear relationships** and complex dependencies. This structure makes it effective in capturing time series patterns, such as seasonality and trend changes, often leading to highly accurate forecasts.
 
-3. **Robustness to Missing and Noisy Data**  
-   Real-world time series data often contain missing values and noise. LightGBM’s handling of missing data within the model, along with its ability to **deal with outliers**, ensures robustness, preventing these issues from skewing predictions.
+- **Robustness to Missing and Noisy Data**  
+Real-world time series data often contain missing values and noise. LightGBM’s handling of missing data within the model, along with its ability to **deal with outliers**, ensures robustness, preventing these issues from skewing predictions.
 
-4. **Flexibility for Grouped and Segmented Forecasting**  
-   In many forecasting scenarios, there’s a need to create separate forecasts for different groups or segments (e.g., regions, products, or customer segments). LightGBM’s structure supports **segmented modeling**, allowing the creation of multiple, tailored forecasts in a single model run, ideal for multi-series forecasting tasks.
+- **Flexibility for Grouped and Segmented Forecasting**  
+In many forecasting scenarios, there’s a need to create separate forecasts for different groups or segments (e.g., regions, products, or customer segments). LightGBM’s structure supports **segmented modeling**, allowing the creation of multiple, tailored forecasts in a single model run, ideal for multi-series forecasting tasks.
 
-5. **Parallelized and GPU-Compatible**  
-   LightGBM’s parallelization capabilities and GPU support make it extremely efficient, allowing rapid iteration and tuning. This is especially beneficial for time series forecasting, where models may need frequent retraining or adjustments as new data becomes available.
+- **Parallelized and GPU-Compatible**  
+LightGBM’s parallelization capabilities and GPU support make it extremely efficient, allowing rapid iteration and tuning. This is especially beneficial for time series forecasting, where models may need frequent retraining or adjustments as new data becomes available.
 
 ### 🧠 When to Use LightGBM for Forecasting
 
