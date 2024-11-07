@@ -134,7 +134,7 @@ The repository is organized into several folders for easy navigation:
   Comprehensive project documentation, detailing the classes, functions, architecture, and usage guidelines.
 
 - **`notebooks`**  
-  Jupyter notebooks demonstrating the LightGBM-Forecaster workflow, including:
+  Jupyter notebooks demonstrating the Forecaster workflow, including:
 
   - **`data_preparation`**: Walks through each step of data preparation, feature engineering, and baseline creation individually, allowing users to customize executions.
   - **`forecasting`**: Covers model evaluation, hyperparameter tuning, feature selection, and forecasting using `Forecaster` class, with insights on both training and validation processes.
@@ -150,7 +150,7 @@ The repository is organized into several folders for easy navigation:
 
 ### 📈 **Example**  
 
-Following the use case for HP Supply Chain Optimization challenge at HackUPC 2023, this project contains end to end notebook example (*runner*) using the data provided for the competition. The goal of this competition is to forecast the optimal inventory level that HP should have for multiple products on a weekly basis. To do this, the goal is to predict the inventory for the next 13 weeks for each of the 100 products.
+Following the use case for HP Supply Chain Optimization challenge at HackUPC 2023, this project contains end to end notebook example (*runner*) using the data provided for the competition. The goal of this competition is to forecast the inventory level that HP will have for multiple products on a weekly basis.
 
 ## Files
 
