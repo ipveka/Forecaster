@@ -154,6 +154,8 @@ Following the use case for HP Supply Chain Optimization challenge at HackUPC 202
 
 ## Files
 
+- **Source**: https://www.kaggle.com/competitions/hp-supply-chain-optimization
+
 - **train.csv**: The training dataset containing historical data with all fields filled in. This file is used to train models.
 
 - **test.csv**: The test dataset, containing data for which predictions are needed. 
