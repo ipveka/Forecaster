@@ -80,22 +80,17 @@ class Runner:
                     n_cutoffs=1,  # Number of cutoffs for backtesting
                     complete_dataframe=True,  # Whether to fill in missing dates
                     smoothing=True,   # Whether to apply smoothing
-                    ma_window_size=13,  # Window size for smoothing
-                    fill_na=True,      # Whether to fill NA values
-                    clean_outliers=False,  # Whether to clean outliers
-                    outlier_cols=None,     # Columns to clean outliers from
-                    lower_quantile=0.025,  # Lower quantile for outlier removal
-                    upper_quantile=0.975,  # Upper quantile for outlier removal
+                    dp_window_size=13,  # Window size for smoothing
                     
                     # Feature engineering parameters
-                    window_sizes=(4, 13),  # Window sizes for feature engineering
+                    fe_window_size=(4, 13),  # Window sizes for feature engineering
                     lags=(4, 13),         # Lag values for creating lag features
                     fill_lags=False,      # Whether to fill forward lags
                     n_clusters=10,        # Number of groups for quantile clustering
                     
                     # Baseline parameters
                     baseline_types=['MA', 'LR', 'ML'],  # Types of baselines to create
-                    window_size=13,                     # Window size for moving average baseline
+                    bs_window_size=13,                     # Window size for moving average baseline
                     
                     # Forecaster parameters
                     training_group=None,       # Column to use for training groups
@@ -107,6 +102,8 @@ class Runner:
                     use_feature_selection=True,  # Whether to use feature selection
                     remove_outliers=False,       # Whether to remove outliers in forecasting
                     outlier_column=None,         # Column from which to remove outliers
+                    lower_quantile=0.025,        # Lower quantile for outlier removal
+                    upper_quantile=0.975,        # Upper quantile for outlier removal
                     ts_decomposition=False,      # Whether to use time series decomposition
                     baseline_col=None,           # Baseline column to use for comparison
                     use_guardrail=False,         # Whether to use guardrail limits
@@ -120,113 +117,6 @@ class Runner:
                     eval_group_filter=None):     # Filter for groups in evaluation
         """
         Run the complete forecasting pipeline from data preparation to evaluation.
-        
-        Parameters:
-        -----------
-        df : pd.DataFrame
-            Input DataFrame containing the raw data.
-            
-        date_col : str
-            Name of the date column.
-            
-        group_cols : list
-            List of columns to group by (e.g., ['client', 'warehouse', 'product']).
-            
-        signal_cols : list
-            List of columns containing the signals to forecast.
-            
-        fill_na : bool, default=True
-            Whether to fill NA values in signal columns.
-            
-        add_cutoff : bool, default=True
-            Whether to add a cutoff column to the DataFrame.
-            
-        add_sample : bool, default=True
-            Whether to add a sample column ('train' or 'test') to the DataFrame.
-            
-        cutoff_date : str or datetime, default=None
-            Date to use as cutoff between train and test. If None, the most recent date is used.
-            
-        fill_method : str, default='linear'
-            Method to use for filling NA values ('linear', 'mean', 'median', 'zero', 'ffill', 'bfill').
-            
-        clean_outliers : bool, default=False
-            Whether to clean outliers in the data.
-            
-        outlier_cols : list, default=None
-            List of columns to clean outliers from. If None, all signal columns are used.
-            
-        lower_quantile : float, default=0.025
-            Lower quantile for outlier removal.
-            
-        upper_quantile : float, default=0.975
-            Upper quantile for outlier removal.
-            
-        create_date_features : bool, default=True
-            Whether to create date features.
-            
-        create_lag_features : bool, default=True
-            Whether to create lag features.
-            
-        lag_periods : list, default=None
-            List of lag periods to use. If None, default lags are used.
-            
-        rolling_periods : list, default=None
-            List of rolling periods to use. If None, default periods are used.
-            
-        min_periods : int, default=1
-            Minimum number of observations required for rolling calculations.
-            
-        create_rolling_features : bool, default=True
-            Whether to create rolling features.
-            
-        create_stats : bool, default=True
-            Whether to create statistical features.
-            
-        create_cov : bool, default=True
-            Whether to create coefficient of variation features.
-            
-        create_categorical : bool, default=True
-            Whether to create categorical features.
-            
-        create_weekday : bool, default=True
-            Whether to create weekday features.
-            
-        freq : str, default=None
-            Frequency of the time series data. If None, frequency is automatically detected.
-            
-        baseline_types : list, default=['MA', 'LR', 'ML']
-            List of baseline types to create ('MA' for moving average, 'LR' for linear regression, 'ML' for LightGBM).
-            
-        window_size : int, default=13
-            Window size for moving average baseline.
-            
-        use_feature_selection : bool, default=True
-            Whether to use feature selection for the forecasting model.
-            
-        n_best_features : int, default=15
-            Number of best features to select if use_feature_selection is True.
-            
-        tune_hyperparameters : bool, default=False
-            Whether to tune hyperparameters for the forecasting model.
-            
-        model : str, default='LGBM'
-            The model to use for forecasting ('LGBM', 'RF', 'GBM', 'ADA', 'LR').
-            
-        use_guardrail : bool, default=False
-            Whether to apply guardrail limits to predictions.
-            
-        guardrail_limit : float, default=2.5
-            Limit value for guardrail adjustments.
-            
-        use_parallel : bool, default=True
-            Whether to run predictions in parallel.
-            
-        eval_group_col : str, default=None
-            Column to group by for evaluation metrics. If None, overall metrics are calculated.
-            
-        eval_group_filter : list, default=None
-            List of values to filter groups for evaluation. If None, all groups are used.
             
         Returns:
         --------
@@ -278,34 +168,9 @@ class Runner:
             freq=freq,
             complete_dataframe=complete_dataframe,
             smoothing=smoothing,
-            ma_window_size=ma_window_size,
+            dp_window_size=dp_window_size,
             n_cutoffs=n_cutoffs
         )
-        
-        # Clean outliers if requested
-        if clean_outliers:
-            if outlier_cols is not None:
-                print(f"Cleaning outliers from columns: {outlier_cols}")
-                print(f"Using quantile range: {lower_quantile} - {upper_quantile}")
-                for col in outlier_cols:
-                    if col in prepared_df.columns:
-                        prepared_df = dp.clean_outliers(
-                            prepared_df, 
-                            group_cols=group_cols, 
-                            col=col, 
-                            lower_quantile=lower_quantile, 
-                            upper_quantile=upper_quantile
-                        )
-            else:
-                print("Cleaning outliers from all signal columns")
-                for col in signal_cols:
-                    prepared_df = dp.clean_outliers(
-                        prepared_df, 
-                        group_cols=group_cols, 
-                        col=col, 
-                        lower_quantile=lower_quantile, 
-                        upper_quantile=upper_quantile
-                    )
                     
         # Log completion of data preparation step
         step_time = time.time() - step_start
@@ -320,7 +185,7 @@ class Runner:
         # Log feature engineering parameters
         print(f"Feature engineering configuration:")
         print(f"• Target column: '{target}'")
-        print(f"• Window sizes: {window_sizes}")
+        print(f"• FE Window size: {fe_window_size}")
         print(f"• Lag periods: {lags}")
         print(f"• Fill lags: {fill_lags}")
         print(f"• Frequency: {freq}")
@@ -332,7 +197,7 @@ class Runner:
             date_col=date_col,
             target=target,
             freq=freq,
-            window_sizes=window_sizes,
+            fe_window_size=fe_window_size,
             lags=lags,
             fill_lags=fill_lags,
             n_clusters=n_clusters
@@ -358,7 +223,7 @@ class Runner:
             date_col=date_col,
             signal_cols=signal_cols,
             baseline_types=baseline_types,
-            window_size=window_size,
+            bs_window_size=bs_window_size,
             feature_cols=feature_cols
         )
         
@@ -371,17 +236,16 @@ class Runner:
         print("-" * 80)
         step_start = time.time()
         logging.info(f"Starting forecasting with model: {model}")
-        forecaster = Forecaster(baseline_df)
         
         # Determine baseline column for guardrail
         baseline_col = None
         if use_guardrail:
             if 'ML' in baseline_types:
-                baseline_col = f'baseline_{signal_cols[0]}_lgbm'
+                baseline_col = f'baseline_{target}_lgbm'
             elif 'LR' in baseline_types:
-                baseline_col = f'baseline_{signal_cols[0]}_lr'
+                baseline_col = f'baseline_{target}_lr'
             else:
-                baseline_col = f'baseline_{signal_cols[0]}'
+                baseline_col = f'baseline_{target}_ma_{window_size}'
         
         # Create necessary columns for the forecaster
         print("\nPreparing dataframe for forecasting...")
@@ -391,28 +255,12 @@ class Runner:
             print(f"Using existing column '{training_group}' as training group")
             # Rename the column to training_group if it's not already called that
             if training_group != 'training_group':
-                baseline_df['training_group'] = baseline_df[training_group]
-                print(f"Copied '{training_group}' column to 'training_group'")
-        elif training_group is not None and training_group not in baseline_df.columns:
-            print(f"Warning: Specified training_group column '{training_group}' not found in data")
+                baseline_df['training_group'] = baseline_df[training_group].astype(int)
+                print(f"Copied '{training_group}' column to 'training_group' and cast to integer")
+        else:
+            # Default baseline
             print("Creating default training_group with value 1")
             baseline_df['training_group'] = 1
-        else:
-            # Use the first group column to create training_group
-            if len(group_cols) > 0:
-                print(f"Creating training_group based on '{group_cols[0]}'")
-                baseline_df['training_group'] = baseline_df[group_cols[0]].astype('category').cat.codes + 1
-            else:
-                print("Creating default training_group with value 1")
-                baseline_df['training_group'] = 1
-        
-        # Make sure weight column exists for weighted training
-        if 'weight' not in baseline_df.columns:
-            baseline_df['weight'] = 1.0
-            print("Added weight column with default value 1.0")
-        
-        # Configure best features parameter
-        best_features_param = True if use_feature_selection else None
         
         # Log forecasting parameters
         print(f"Forecasting configuration:")
@@ -432,6 +280,9 @@ class Runner:
             print(f"• Baseline column: '{baseline_col}'")
         print(f"• Use parallel processing: {use_parallel}")
         print(f"• Remove outliers: {remove_outliers}")
+
+        # Start forecaster
+        forecaster = Forecaster(baseline_df)
         
         try:
             # Get the list of feature columns
@@ -463,13 +314,9 @@ class Runner:
                 num_cpus=num_cpus
             )
         except Exception as e:
+            # Show error
             print(f"Error in forecasting step: {str(e)}")
-            # For test purposes, if forecasting fails, we'll add a prediction column to continue the test
-            print("\nFALLBACK: Using baseline as prediction due to forecasting error")
-            logging.warning(f"Forecasting failed: {str(e)}. Using baseline as prediction instead.")
-            baseline_df['prediction'] = baseline_df[f'baseline_{signal_cols[0]}']
-            forecast_df = baseline_df
-            print(f"Created prediction column from baseline '{baseline_col if baseline_col else f'baseline_{signal_cols[0]}'}'")
+            raise
         
         # Store the final DataFrame
         self.final_df = forecast_df
@@ -582,37 +429,27 @@ class Runner:
             print("Adding mock prediction column for evaluation")
             forecast_df['prediction'] = forecast_df[baseline_column]
         
-        try:
-            # Create an evaluator
-            evaluator = Evaluator(
-                df=forecast_df,
-                actuals_col=signal_cols[0],
-                baseline_col=baseline_column,
-                preds_cols=pred_cols
-            )
-            
-            # Calculate metrics
-            self.metrics = evaluator.evaluate()
-            self.metric_table = evaluator.create_metric_table()
-            
-            # If a grouping column is specified, calculate grouped metrics
-            if eval_group_col and eval_group_col in forecast_df.columns:
-                self.grouped_metrics = evaluator.calculate_grouped_metric(
-                    metric_name='RMSE',
-                    group_col=eval_group_col,
-                    group_filter=eval_group_filter
-                )
-        except Exception as e:
-            print(f"Error in evaluation step: {str(e)}")
-            # Create mock metrics for testing
-            self.metrics = {
-                'RMSE': {baseline_column: 1.0, 'prediction': 1.0},
-                'MAE': {baseline_column: 1.0, 'prediction': 1.0},
-                'MAPE': {baseline_column: 0.1, 'prediction': 0.1},
-                'WMAPE': {baseline_column: 0.1, 'prediction': 0.1}
-            }
-            self.metric_table = pd.DataFrame(self.metrics).round(3)
+        # Create an evaluator
+        evaluator = Evaluator(
+            df=forecast_df,
+            actuals_col=signal_cols[0],
+            baseline_col=baseline_column,
+            preds_cols=pred_cols
+        )
         
+        # Calculate metrics
+        self.metrics = evaluator.evaluate()
+        self.metric_table = evaluator.create_metric_table()
+        
+        # If a grouping column is specified, calculate grouped metrics
+        if eval_group_col and eval_group_col in forecast_df.columns:
+            self.grouped_metrics = evaluator.calculate_grouped_metric(
+                metric_name='RMSE',
+                group_col=eval_group_col,
+                group_filter=eval_group_filter
+            )
+        
+        # Step time
         step_time = time.time() - step_start
         total_time = time.time() - start_time
         self.execution_time = total_time

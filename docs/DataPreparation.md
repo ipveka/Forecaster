@@ -34,9 +34,10 @@ This class is responsible for preparing the data before the forecasting process.
 ### 4. `smoothing`
 
 - **Description**: Smooths signal columns by filling missing values using a rolling average.
-- **Parameters**: DataFrame (`df`), group columns, date column, signal columns, and the window size for the moving average.
+- **Parameters**: DataFrame (`df`), group columns, date column, signal columns, and the window size for the moving average (`dp_window_size`).
 - **Returns**: A DataFrame with additional columns for smoothed signals.
 - **Performance**: Uses pandas' groupby.transform for vectorized operations, significantly improving performance with large datasets.
+- **Recent Updates**: Parameter has been renamed from `ma_window_size` to `dp_window_size` for clarity and consistency across the framework.
 
 ---
 

@@ -15,10 +15,11 @@ The class has been optimized for performance, utilizing vectorized operations an
   - `date_col`: Column containing dates.
   - `target`: Target variable for analysis.
   - `freq`: Frequency of the data (default: None). If None, frequency will be auto-detected.
-  - `window_sizes`: Window sizes for statistical calculations (default: (4, 13)).
+  - `fe_window_size`: Window sizes for statistical calculations (default: (4, 13)).
   - `lags`: Lag values for creating lag features (default: (4, 13)).
   - `fill_lags`: Whether to fill forward lag values (default: False).
   - `n_clusters`: Number of groups for quantile clustering (default: 10).
+- **Recent Updates**: Parameter has been renamed from `window_sizes` to `fe_window_size` for clarity and consistency across the framework.
 - **Returns**: Prepared DataFrame with all generated features.
 - **Optimization**: The method now automatically converts the date column to datetime format and detects frequency if not provided.
 
