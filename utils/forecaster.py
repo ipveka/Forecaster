@@ -255,44 +255,87 @@ class Forecaster:
         :param n_best_features: Number of best features to select
         :return: List of selected feature names
         """
-        # Select only float64 columns
-        numeric_features = X.select_dtypes(include=['float64']).columns
+        try:
+            # Select only float64 columns
+            numeric_features = X.select_dtypes(include=['float64']).columns
 
-        # Concatenate X and y to ensure both are cleaned of NaN rows simultaneously
-        data = pd.concat([X[group_cols], X[numeric_features], y], axis=1)
+            if len(numeric_features) == 0:
+                print("Warning: No float64 features found for feature selection.")
+                return []
 
-        # Function to compute MI scores for a group
-        def compute_mi_scores(group):
-            # Select features and target
-            X_clean = group[numeric_features]
-            y_clean = group[y.name]
+            # Validate group columns exist in X
+            for col in group_cols:
+                if col not in X.columns:
+                    print(f"Warning: Group column '{col}' not found in features. Skipping feature selection.")
+                    return numeric_features.tolist()[:min(n_best_features, len(numeric_features))]
 
-            # Check if the lengths of X_clean and y_clean are the same and if they have at least 2 samples
-            if len(X_clean) == len(y_clean) and len(X_clean) > 1:
+            # Concatenate X and y to ensure both are cleaned of NaN rows simultaneously
+            data = pd.concat([X[group_cols], X[numeric_features], y], axis=1)
+
+            # Remove any rows with NaN values in numeric features or target
+            data = data.dropna(subset=[y.name] + numeric_features.tolist())
+
+            if data.empty:
+                print("Warning: No valid data for feature selection after removing NaN values.")
+                return numeric_features.tolist()[:min(n_best_features, len(numeric_features))]
+
+            # Function to compute MI scores for a group
+            def compute_mi_scores(group):
+                # Select features and target
+                X_clean = group[numeric_features]
+                y_clean = group[y.name]
+
+                # Check if the lengths of X_clean and y_clean are the same and if they have at least 2 samples
+                if len(X_clean) == len(y_clean) and len(X_clean) > 1:
+                    try:
+                        return mutual_info_regression(X_clean, y_clean)
+                    except ValueError as e:
+                        if "Expected n_neighbors < n_samples_fit" in str(e):
+                            # If the error is due to n_neighbors being greater than n_samples_fit,
+                            # set n_neighbors to 1 less than the number of samples
+                            return mutual_info_regression(X_clean, y_clean, n_neighbors=len(X_clean) - 1)
+                        else:
+                            print(f"ValueError in mutual_info_regression: {str(e)}")
+                            return np.zeros(len(numeric_features))
+                    except Exception as e:
+                        print(f"Unexpected error in compute_mi_scores: {str(e)}")
+                        return np.zeros(len(numeric_features))
+                else:
+                    return np.zeros(len(numeric_features))
+
+            # Compute MI scores for each group with error handling
+            all_scores = []
+            for name, group in data.groupby(group_cols):
                 try:
-                    return mutual_info_regression(X_clean, y_clean)
-                except ValueError as e:
-                    if "Expected n_neighbors < n_samples_fit" in str(e):
-                        # If the error is due to n_neighbors being greater than n_samples_fit,
-                        # set n_neighbors to 1 less than the number of samples
-                        return mutual_info_regression(X_clean, y_clean, n_neighbors=len(X_clean) - 1)
-                    else:
-                        raise e
-            else:
-                return np.zeros(len(numeric_features))
+                    scores = compute_mi_scores(group)
+                    if scores is not None and len(scores) == len(numeric_features):
+                        all_scores.append(scores)
+                except Exception as e:
+                    print(f"Error processing group {name}: {str(e)}")
+                    continue
 
-        # Compute MI scores for each group
-        grouped_mi_scores = data.groupby(group_cols).apply(compute_mi_scores)
+            # If no valid scores were computed, return all numeric features
+            if not all_scores:
+                print("Warning: Could not compute feature importance scores for any group.")
+                return numeric_features.tolist()[:min(n_best_features, len(numeric_features))]
 
-        # Average MI scores across groups
-        avg_mi_scores = grouped_mi_scores.mean()
+            # Convert to numpy array and compute the mean
+            all_scores_array = np.array(all_scores)
+            avg_mi_scores = np.mean(all_scores_array, axis=0)
 
-        # Store the features and their average mutual information scores in a DataFrame
-        feature_scores = pd.DataFrame({'feature': numeric_features, 'mi_score': avg_mi_scores})
+            # Store the features and their average mutual information scores in a DataFrame
+            feature_scores = pd.DataFrame({'feature': numeric_features, 'mi_score': avg_mi_scores})
 
-        # Select the n_best_features
-        best_features = feature_scores.nlargest(n_best_features, 'mi_score')['feature'].tolist()
-        return best_features
+            # Select the n_best_features
+            best_features = feature_scores.nlargest(n_best_features, 'mi_score')['feature'].tolist()
+            return best_features
+
+        except Exception as e:
+            print(f"Unexpected error during best feature selection: {str(e)}")
+            # Return a subset of numeric features as a fallback
+            if 'numeric_features' in locals() and len(numeric_features) > 0:
+                return numeric_features.tolist()[:min(n_best_features, len(numeric_features))]
+            return []
 
     # Tune hyperparameters
     def _tune_hyperparameters(self, X_train, y_train, model='LGBM', params=None, param_distributions=None, search_method='halving', n_splits=4,
