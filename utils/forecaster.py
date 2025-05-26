@@ -149,7 +149,7 @@ class Forecaster:
                     continue
 
                 # Decompose the time series
-                result = seasonal_decompose(group_data[column], model='additive', period=1)  # Adjust period as needed
+                result = seasonal_decompose(group_data[column], model='additive', period=1)
                 residual = result.resid
 
                 # Calculate lower and upper bounds for residuals

@@ -1,20 +1,31 @@
 # General libraries
 import pandas as pd
 import numpy as np
-import warnings
+
+# Utilities
+from pathlib import Path
 import psutil
 import gc
 import os
+
+# Other libraries
 from itertools import product
+
+# Plots
 import matplotlib.pyplot as plt
+
+# ML
+from sklearn.preprocessing import LabelEncoder
 from sklearn.linear_model import LinearRegression
 from lightgbm import LGBMRegressor
-from sklearn.preprocessing import LabelEncoder
 
-# Options
+# Warnings
+import warnings
 warnings.filterwarnings("ignore", category=DeprecationWarning)
 warnings.filterwarnings("ignore", category=UserWarning)
 warnings.simplefilter(action='ignore', category=pd.errors.PerformanceWarning)
+
+# Pd options
 pd.options.mode.chained_assignment = None
 
 # Feature engineering class
@@ -22,78 +33,6 @@ class FeatureEngineering:
     # Init
     def __init__(self):
         pass
-        
-    # Detect frequency
-    def detect_frequency(self, df, date_col):
-        """
-        Automatically detect the frequency of time series data based on the date column.
-        
-        Parameters:
-        df (pd.DataFrame): The input DataFrame.
-        date_col (str): The name of the date column.
-        
-        Returns:
-        str: The detected frequency as a pandas frequency string (e.g., 'D', 'W', 'M', 'Q', 'Y').
-        """
-        # Make sure the date column is datetime
-        dates = pd.Series(df[date_col].unique()).sort_values()
-        
-        # Calculate time differences between consecutive dates
-        time_diffs = dates.diff().dropna()
-        
-        if len(time_diffs) == 0:
-            # Default to daily if we can't determine
-            return 'D'
-        
-        # Calculate the most common time difference in days
-        median_diff_days = time_diffs.median().days
-        
-        # Get the most common difference in days, defaulting to median if empty
-        day_counts = time_diffs.dt.days.value_counts()
-        if day_counts.empty:
-            most_common_diff = median_diff_days
-        else:
-            most_common_diff = day_counts.index[0]
-        
-        # Map the days difference to standard pandas frequency strings
-        if most_common_diff <= 1:
-            # Daily
-            return 'D'
-        elif 2 <= most_common_diff <= 3:
-            # Business days
-            return 'B'
-        elif 6 <= most_common_diff <= 8:
-            # Weekly - check if it's consistently on the same day of week
-            dow_counts = dates.dt.dayofweek.value_counts()
-            most_common_dow = dow_counts.idxmax()
-            dow_pct = dow_counts.max() / dow_counts.sum()
-            
-            if dow_pct > 0.7:  # If more than 70% of dates fall on the same day of week
-                dow_map = {0: 'W-MON', 1: 'W-TUE', 2: 'W-WED', 3: 'W-THU', 4: 'W-FRI', 5: 'W-SAT', 6: 'W-SUN'}
-                return dow_map[most_common_dow]
-            else:
-                return 'W'  # Generic weekly
-        elif 28 <= most_common_diff <= 31:
-            # Monthly - check if it's consistently on the same day of month
-            dom_counts = dates.dt.day.value_counts()
-            if dom_counts.empty:
-                return 'M'  # Default to month-end if empty
-                
-            dom_pct = dom_counts.max() / dom_counts.sum()
-            
-            if dom_pct > 0.7:  # If more than 70% of dates fall on the same day of month
-                return 'MS' if dates.dt.day.mode()[0] <= 5 else 'M'
-            else:
-                return 'M'  # End of month
-        elif 89 <= most_common_diff <= 93:
-            return 'Q'  # Quarterly
-        elif 180 <= most_common_diff <= 186:
-            return 'SM'  # Semi-month
-        elif 364 <= most_common_diff <= 366:
-            return 'Y'  # Yearly
-        else:
-            # For unusual frequencies, return a custom frequency based on days
-            return f'{int(most_common_diff)}D'
 
     # Prepare data
     def run_feature_engineering(self, df, group_cols, date_col, target, freq=None,
@@ -191,6 +130,78 @@ class FeatureEngineering:
         print("Feature engineering completed.")
         return df
 
+    # Detect frequency
+    def detect_frequency(self, df, date_col):
+        """
+        Automatically detect the frequency of time series data based on the date column.
+        
+        Parameters:
+        df (pd.DataFrame): The input DataFrame.
+        date_col (str): The name of the date column.
+        
+        Returns:
+        str: The detected frequency as a pandas frequency string (e.g., 'D', 'W', 'M', 'Q', 'Y').
+        """
+        # Make sure the date column is datetime
+        dates = pd.Series(df[date_col].unique()).sort_values()
+        
+        # Calculate time differences between consecutive dates
+        time_diffs = dates.diff().dropna()
+        
+        if len(time_diffs) == 0:
+            # Default to daily if we can't determine
+            return 'D'
+        
+        # Calculate the most common time difference in days
+        median_diff_days = time_diffs.median().days
+        
+        # Get the most common difference in days, defaulting to median if empty
+        day_counts = time_diffs.dt.days.value_counts()
+        if day_counts.empty:
+            most_common_diff = median_diff_days
+        else:
+            most_common_diff = day_counts.index[0]
+        
+        # Map the days difference to standard pandas frequency strings
+        if most_common_diff <= 1:
+            # Daily
+            return 'D'
+        elif 2 <= most_common_diff <= 3:
+            # Business days
+            return 'B'
+        elif 6 <= most_common_diff <= 8:
+            # Weekly - check if it's consistently on the same day of week
+            dow_counts = dates.dt.dayofweek.value_counts()
+            most_common_dow = dow_counts.idxmax()
+            dow_pct = dow_counts.max() / dow_counts.sum()
+            
+            if dow_pct > 0.7:  # If more than 70% of dates fall on the same day of week
+                dow_map = {0: 'W-MON', 1: 'W-TUE', 2: 'W-WED', 3: 'W-THU', 4: 'W-FRI', 5: 'W-SAT', 6: 'W-SUN'}
+                return dow_map[most_common_dow]
+            else:
+                return 'W'  # Generic weekly
+        elif 28 <= most_common_diff <= 31:
+            # Monthly - check if it's consistently on the same day of month
+            dom_counts = dates.dt.day.value_counts()
+            if dom_counts.empty:
+                return 'M'  # Default to month-end if empty
+                
+            dom_pct = dom_counts.max() / dom_counts.sum()
+            
+            if dom_pct > 0.7:  # If more than 70% of dates fall on the same day of month
+                return 'MS' if dates.dt.day.mode()[0] <= 5 else 'M'
+            else:
+                return 'M'  # End of month
+        elif 89 <= most_common_diff <= 93:
+            return 'Q'  # Quarterly
+        elif 180 <= most_common_diff <= 186:
+            return 'SM'  # Semi-month
+        elif 364 <= most_common_diff <= 366:
+            return 'Y'  # Yearly
+        else:
+            # For unusual frequencies, return a custom frequency based on days
+            return f'{int(most_common_diff)}D'
+
     # Create encoded features
     def create_encoded_features(self, df, categorical_columns):
         """
@@ -286,7 +297,7 @@ class FeatureEngineering:
         Parameters:
             df (pd.DataFrame): Input DataFrame with a date column.
             date_col (str): The name of the date column from which to extract the features.
-            freq (str): Frequency type ('W' for weekly, 'M' for monthly).
+            freq (str): Frequency type
 
         Returns:
             pd.DataFrame: DataFrame with new feature columns, all prefixed with 'feature_'.
@@ -302,13 +313,9 @@ class FeatureEngineering:
         df['feature_quarter'] = df[date_col].dt.quarter
         df['feature_month'] = df[date_col].dt.month
 
-        # Create weekly features if specified
-        if freq.startswith('W-') or freq == 'W':
-            df['feature_week'] = df[date_col].dt.isocalendar().week.astype(int)
-        elif freq == 'M':
-            df['feature_month'] = df[date_col].dt.month
-        else:
-            raise ValueError("Frequency must be either 'W', a specific weekday like 'W-MON', or 'M' for monthly.")
+        # Lower frequency features
+        df['feature_week'] = df[date_col].dt.isocalendar().week.astype(int)
+        df['feature_day'] = df[date_col].dt.day
 
         # Calculate next quarter end dates using pandas built-in function
         df['next_quarter_end'] = df[date_col] + pd.offsets.QuarterEnd(0)
@@ -325,7 +332,6 @@ class FeatureEngineering:
         df['feature_weeks_until_next_end_of_quarter'] = (
             (df['next_quarter_end'] - df[date_col]).dt.days / 7
         ).astype(float)
-
         df['feature_weeks_until_end_of_year'] = (
             (df['next_year_end'] - df[date_col]).dt.days / 7
         ).astype(float)
@@ -335,7 +341,6 @@ class FeatureEngineering:
             ((df['next_quarter_end'].dt.year - df[date_col].dt.year) * 12 +
             df['next_quarter_end'].dt.month - df[date_col].dt.month)
         ).astype(float)
-
         df['feature_months_until_end_of_year'] = (
             ((df['next_year_end'].dt.year - df[date_col].dt.year) * 12 +
             df['next_year_end'].dt.month - df[date_col].dt.month)
@@ -480,16 +485,16 @@ class FeatureEngineering:
             # Group once per signal column
             grouped = df_copy.groupby(group_columns)[signal_column]
             
+            # Loop by lag
             for lag in lags:
                 lag_feature_column = f'feature_{signal_column}_lag_{lag}'
                 lag_feature_columns.append(lag_feature_column)
                 df_copy[lag_feature_column] = grouped.shift(lag)
         
-        # Create row numbers for test data more efficiently using cumcount
         # First create a mask for test rows
         test_mask = df_copy['sample'] == 'test'
         
-        # Only process test data if there are test rows (optimize for training-only cases)
+        # Only process test data if there are test rows
         if test_mask.any():
             # Initialize row_num column only for test rows to save memory
             df_copy['row_num'] = np.nan
@@ -501,16 +506,16 @@ class FeatureEngineering:
             for lag in lags:
                 for signal_column in signal_columns:
                     lag_feature_column = f'feature_{signal_column}_lag_{lag}'
-                    # Apply condition all at once - vectorized operation is much faster
+                    # Apply condition all at once
                     invalid_lags_mask = test_mask & (df_copy['row_num'] < lag)
-                    if invalid_lags_mask.any():  # Only modify if there are rows to change
+                    if invalid_lags_mask.any():
                         df_copy.loc[invalid_lags_mask, lag_feature_column] = None
 
             # Fill forward the last known value for lags if requested
-            if fill_lags and lag_feature_columns:  # Check if lag_feature_columns is not empty
+            if fill_lags and lag_feature_columns:
                 for group_name, group_df in df_copy.groupby(group_columns):
                     group_indices = group_df.index
-                    if len(group_indices) > 0:  # Only process if there are rows in this group
+                    if len(group_indices) > 0:
                         df_copy.loc[group_indices, lag_feature_columns] = \
                             df_copy.loc[group_indices, lag_feature_columns].ffill()
             
