@@ -1,3 +1,4 @@
+# Install: pip install -r requirements.txt
 # General libraries
 pandas
 numpy
@@ -12,6 +13,9 @@ scikit-learn
 
 # Stats
 statsmodels
+
+# Testing
+pytest>=7.0.0
 
 # Other
 google

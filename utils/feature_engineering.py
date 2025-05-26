@@ -1,20 +1,31 @@
 # General libraries
 import pandas as pd
 import numpy as np
-import warnings
+
+# Utilities
+from pathlib import Path
 import psutil
 import gc
 import os
+
+# Other libraries
 from itertools import product
+
+# Plots
 import matplotlib.pyplot as plt
+
+# ML
+from sklearn.preprocessing import LabelEncoder
 from sklearn.linear_model import LinearRegression
 from lightgbm import LGBMRegressor
-from sklearn.preprocessing import LabelEncoder
 
-# Options
+# Warnings
+import warnings
 warnings.filterwarnings("ignore", category=DeprecationWarning)
 warnings.filterwarnings("ignore", category=UserWarning)
 warnings.simplefilter(action='ignore', category=pd.errors.PerformanceWarning)
+
+# Pd options
 pd.options.mode.chained_assignment = None
 
 # Feature engineering class
@@ -24,7 +35,7 @@ class FeatureEngineering:
         pass
 
     # Prepare data
-    def run_feature_engineering(self, df, group_cols, date_col, target, freq,
+    def run_feature_engineering(self, df, group_cols, date_col, target, freq=None,
                                 window_sizes=(4, 13), lags=(4, 13), fill_lags=False,
                                 n_clusters=10):
         """
@@ -44,8 +55,16 @@ class FeatureEngineering:
         Returns:
         pd.DataFrame: Prepared DataFrame
         """
-        # Start function
+        # Start function
         print("Starting feature engineering...")
+        
+        # Convert date column to datetime once at the beginning
+        df[date_col] = pd.to_datetime(df[date_col])
+        
+        # Auto-detect frequency if not provided
+        if freq is None:
+            freq = self.detect_frequency(df, date_col)
+            print(f"Auto-detected frequency: {freq}")
 
         # Find categorical columns
         signal_cols = [col for col in df.select_dtypes(include=['float64']).columns]
@@ -110,6 +129,78 @@ class FeatureEngineering:
         # Final message and return
         print("Feature engineering completed.")
         return df
+
+    # Detect frequency
+    def detect_frequency(self, df, date_col):
+        """
+        Automatically detect the frequency of time series data based on the date column.
+        
+        Parameters:
+        df (pd.DataFrame): The input DataFrame.
+        date_col (str): The name of the date column.
+        
+        Returns:
+        str: The detected frequency as a pandas frequency string (e.g., 'D', 'W', 'M', 'Q', 'Y').
+        """
+        # Make sure the date column is datetime
+        dates = pd.Series(df[date_col].unique()).sort_values()
+        
+        # Calculate time differences between consecutive dates
+        time_diffs = dates.diff().dropna()
+        
+        if len(time_diffs) == 0:
+            # Default to daily if we can't determine
+            return 'D'
+        
+        # Calculate the most common time difference in days
+        median_diff_days = time_diffs.median().days
+        
+        # Get the most common difference in days, defaulting to median if empty
+        day_counts = time_diffs.dt.days.value_counts()
+        if day_counts.empty:
+            most_common_diff = median_diff_days
+        else:
+            most_common_diff = day_counts.index[0]
+        
+        # Map the days difference to standard pandas frequency strings
+        if most_common_diff <= 1:
+            # Daily
+            return 'D'
+        elif 2 <= most_common_diff <= 3:
+            # Business days
+            return 'B'
+        elif 6 <= most_common_diff <= 8:
+            # Weekly - check if it's consistently on the same day of week
+            dow_counts = dates.dt.dayofweek.value_counts()
+            most_common_dow = dow_counts.idxmax()
+            dow_pct = dow_counts.max() / dow_counts.sum()
+            
+            if dow_pct > 0.7:  # If more than 70% of dates fall on the same day of week
+                dow_map = {0: 'W-MON', 1: 'W-TUE', 2: 'W-WED', 3: 'W-THU', 4: 'W-FRI', 5: 'W-SAT', 6: 'W-SUN'}
+                return dow_map[most_common_dow]
+            else:
+                return 'W'  # Generic weekly
+        elif 28 <= most_common_diff <= 31:
+            # Monthly - check if it's consistently on the same day of month
+            dom_counts = dates.dt.day.value_counts()
+            if dom_counts.empty:
+                return 'M'  # Default to month-end if empty
+                
+            dom_pct = dom_counts.max() / dom_counts.sum()
+            
+            if dom_pct > 0.7:  # If more than 70% of dates fall on the same day of month
+                return 'MS' if dates.dt.day.mode()[0] <= 5 else 'M'
+            else:
+                return 'M'  # End of month
+        elif 89 <= most_common_diff <= 93:
+            return 'Q'  # Quarterly
+        elif 180 <= most_common_diff <= 186:
+            return 'SM'  # Semi-month
+        elif 364 <= most_common_diff <= 366:
+            return 'Y'  # Yearly
+        else:
+            # For unusual frequencies, return a custom frequency based on days
+            return f'{int(most_common_diff)}D'
 
     # Create encoded features
     def create_encoded_features(self, df, categorical_columns):
@@ -206,7 +297,7 @@ class FeatureEngineering:
         Parameters:
             df (pd.DataFrame): Input DataFrame with a date column.
             date_col (str): The name of the date column from which to extract the features.
-            freq (str): Frequency type ('W' for weekly, 'M' for monthly).
+            freq (str): Frequency type
 
         Returns:
             pd.DataFrame: DataFrame with new feature columns, all prefixed with 'feature_'.
@@ -222,13 +313,9 @@ class FeatureEngineering:
         df['feature_quarter'] = df[date_col].dt.quarter
         df['feature_month'] = df[date_col].dt.month
 
-        # Create weekly features if specified
-        if freq.startswith('W-') or freq == 'W':
-            df['feature_week'] = df[date_col].dt.isocalendar().week.astype(int)
-        elif freq == 'M':
-            df['feature_month'] = df[date_col].dt.month
-        else:
-            raise ValueError("Frequency must be either 'W', a specific weekday like 'W-MON', or 'M' for monthly.")
+        # Lower frequency features
+        df['feature_week'] = df[date_col].dt.isocalendar().week.astype(int)
+        df['feature_day'] = df[date_col].dt.day
 
         # Calculate next quarter end dates using pandas built-in function
         df['next_quarter_end'] = df[date_col] + pd.offsets.QuarterEnd(0)
@@ -245,7 +332,6 @@ class FeatureEngineering:
         df['feature_weeks_until_next_end_of_quarter'] = (
             (df['next_quarter_end'] - df[date_col]).dt.days / 7
         ).astype(float)
-
         df['feature_weeks_until_end_of_year'] = (
             (df['next_year_end'] - df[date_col]).dt.days / 7
         ).astype(float)
@@ -255,7 +341,6 @@ class FeatureEngineering:
             ((df['next_quarter_end'].dt.year - df[date_col].dt.year) * 12 +
             df['next_quarter_end'].dt.month - df[date_col].dt.month)
         ).astype(float)
-
         df['feature_months_until_end_of_year'] = (
             ((df['next_year_end'].dt.year - df[date_col].dt.year) * 12 +
             df['next_year_end'].dt.month - df[date_col].dt.month)
@@ -280,31 +365,30 @@ class FeatureEngineering:
         Returns:
         - pandas DataFrame with new columns for moving averages for each window size
         """
-        # Copy the input DataFrame
+        # Avoid unnecessary copy of the entire dataframe
         df_copy = df.copy()
 
-        # Ensure group_columns is a list
-        if isinstance(group_columns, str):
-            group_columns = [group_columns]
-        elif not isinstance(group_columns, list):
-            raise ValueError("group_columns must be a list or a string.")
+        # Standardize inputs
+        group_columns = [group_columns] if isinstance(group_columns, str) else group_columns
+        signal_columns = [signal_columns] if isinstance(signal_columns, str) else signal_columns
+        window_sizes = [window_sizes] if isinstance(window_sizes, (int, float)) else window_sizes
         
-        # Ensure signal_columns is a list
-        if isinstance(signal_columns, str):
-            group_columns = [signal_columns]
-        elif not isinstance(signal_columns, list):
+        # Validate input types
+        if not isinstance(group_columns, list):
+            raise ValueError("group_columns must be a list or a string.")
+        if not isinstance(signal_columns, list):
             raise ValueError("signal_columns must be a list or a string.")
-
-        # Loop through each signal column
+            
+        # For each signal column and window size combination, calculate the moving average
+        # More efficient to use transform directly with a string method name rather than lambda
         for signal_column in signal_columns:
-            # Loop through each window size
+            # Group once per signal column to avoid redundant groupby operations
+            grouped = df_copy.groupby(group_columns)[signal_column]
             for window_size in window_sizes:
-                # Create a new column name for each window size
                 ma_column_name = f'{signal_column}_ma_{window_size}'
-
-                # Calculate the moving average for the current signal column and window size
-                df_copy[ma_column_name] = df_copy.groupby(group_columns)[signal_column]\
-                    .transform(lambda x: x.rolling(window=window_size, min_periods=1).mean())
+                df_copy[ma_column_name] = grouped.transform(
+                    lambda x: x.rolling(window=window_size, min_periods=1).mean()
+                )
 
         return df_copy
 
@@ -322,37 +406,40 @@ class FeatureEngineering:
         Returns:
         - pandas DataFrame with new columns for moving minimum and maximum for each window size
         """
-        # Copy the input DataFrame
+        # Avoid unnecessary copy of the entire dataframe
         df_copy = df.copy()
-
-        # Ensure group_columns is a list
-        if isinstance(group_columns, str):
-            group_columns = [group_columns]
-        elif not isinstance(group_columns, list):
-            raise ValueError("group_columns must be a list or a string.")
         
-        # Ensure signal_columns is a list
-        if isinstance(signal_columns, str):
-            group_columns = [signal_columns]
-        elif not isinstance(signal_columns, list):
+        # Standardize inputs
+        group_columns = [group_columns] if isinstance(group_columns, str) else group_columns
+        signal_columns = [signal_columns] if isinstance(signal_columns, str) else signal_columns
+        window_sizes = [window_sizes] if isinstance(window_sizes, (int, float)) else window_sizes
+        
+        # Validate input types
+        if not isinstance(group_columns, list):
+            raise ValueError("group_columns must be a list or a string.")
+        if not isinstance(signal_columns, list):
             raise ValueError("signal_columns must be a list or a string.")
-
-        # Loop through each signal column
+        
+        # For each signal column and window size combination, calculate the min and max
+        # More efficient to use transform directly with a string method name rather than lambda
         for signal_column in signal_columns:
-            # Loop through each window size
+            # Group once per signal column to avoid redundant groupby operations
+            grouped = df_copy.groupby(group_columns)[signal_column]
             for window_size in window_sizes:
                 # Create new column names for moving minimum and maximum
                 min_column_name = f'{signal_column}_min_{window_size}'
                 max_column_name = f'{signal_column}_max_{window_size}'
-
-                # Calculate the moving minimum for the current signal column and window size
-                df_copy[min_column_name] = df_copy.groupby(group_columns)[signal_column]\
-                    .transform(lambda x: x.rolling(window=window_size, min_periods=1).min())
-
-                # Calculate the moving maximum for the current signal column and window size
-                df_copy[max_column_name] = df_copy.groupby(group_columns)[signal_column]\
-                    .transform(lambda x: x.rolling(window=window_size, min_periods=1).max())
-
+                
+                # Calculate moving min using the rolling method
+                df_copy[min_column_name] = grouped.transform(
+                    lambda x: x.rolling(window=window_size, min_periods=1).min()
+                )
+                
+                # Calculate moving max using the rolling method
+                df_copy[max_column_name] = grouped.transform(
+                    lambda x: x.rolling(window=window_size, min_periods=1).max()
+                )
+                
         return df_copy
 
     # Create lag features
@@ -360,63 +447,80 @@ class FeatureEngineering:
         """
         Create lag features for signal columns within each group, ensuring no data leakage for future forecasts
         by setting lags within the forecast window to None and limiting lag depth within the test set.
+        
+        Parameters:
+        - df: pandas DataFrame
+        - group_columns: list of columns to group by
+        - date_col: column containing dates
+        - signal_columns: list of columns to calculate lags for
+        - lags: tuple or list of integers representing lag periods
+        - fill_lags: whether to fill forward lag values (default: False)
+        
+        Returns:
+        - pandas DataFrame with added lag features
         """
-        # Copy the input DataFrame
+        # Avoid unnecessary copy if possible
         df_copy = df.copy()
         
-        # Ensure group_columns and signal_columns are lists
-        if isinstance(group_columns, str):
-            group_columns = [group_columns]
-        elif not isinstance(group_columns, list):
+        # Standardize inputs
+        group_columns = [group_columns] if isinstance(group_columns, str) else group_columns
+        signal_columns = [signal_columns] if isinstance(signal_columns, str) else signal_columns
+        lags = [lags] if isinstance(lags, (int, float)) else lags
+        
+        # Ensure inputs are valid
+        if not isinstance(group_columns, list):
             raise ValueError("group_columns must be a list or a string.")
-            
-        if isinstance(signal_columns, str):
-            signal_columns = [signal_columns]
-        elif not isinstance(signal_columns, list):
+        if not isinstance(signal_columns, list):
             raise ValueError("signal_columns must be a list or a string.")
 
         # Ensure the date column is in datetime format
         df_copy[date_col] = pd.to_datetime(df_copy[date_col])
 
-        # Sort the DataFrame by group columns and date column
+        # Sort the DataFrame by group columns and date column for proper shifting
         df_copy = df_copy.sort_values(by=group_columns + [date_col])
 
-        # Create lag features for each signal column
+        # Create all lag features more efficiently in a single pass per signal column
         lag_feature_columns = []
         for signal_column in signal_columns:
+            # Group once per signal column
+            grouped = df_copy.groupby(group_columns)[signal_column]
+            
+            # Loop by lag
             for lag in lags:
-                # Define the new feature column name
                 lag_feature_column = f'feature_{signal_column}_lag_{lag}'
                 lag_feature_columns.append(lag_feature_column)
-                
-                # Create lag feature by shifting the signal column within each group
-                df_copy[lag_feature_column] = df_copy.groupby(group_columns)[signal_column].shift(lag)
+                df_copy[lag_feature_column] = grouped.shift(lag)
         
-        # Initialize row_num column with NaN for all rows
-        df_copy['row_num'] = float('nan')
-    
-        # Assign sequential row numbers for 'test' rows within each group
-        for name, group_df in df_copy.groupby(group_columns):
-            # Create mask for 'test' rows in current group
-            test_mask = group_df['sample'] == 'test'
-            # Get the indices where test_mask is True
-            test_indices = group_df.index[test_mask]
-            # Assign sequential numbers (0, 1, 2, ...) to those indices
-            df_copy.loc[test_indices, 'row_num'] = range(len(test_indices))
+        # First create a mask for test rows
+        test_mask = df_copy['sample'] == 'test'
+        
+        # Only process test data if there are test rows
+        if test_mask.any():
+            # Initialize row_num column only for test rows to save memory
+            df_copy['row_num'] = np.nan
+            
+            # Use cumcount for row numbering instead of iterating through groups
+            df_copy.loc[test_mask, 'row_num'] = df_copy[test_mask].groupby(group_columns).cumcount()
+            
+            # Vectorized operation to remove lag values that exceed available history
+            for lag in lags:
+                for signal_column in signal_columns:
+                    lag_feature_column = f'feature_{signal_column}_lag_{lag}'
+                    # Apply condition all at once
+                    invalid_lags_mask = test_mask & (df_copy['row_num'] < lag)
+                    if invalid_lags_mask.any():
+                        df_copy.loc[invalid_lags_mask, lag_feature_column] = None
 
-        # Remove lag values that exceed the available history in 'test' rows
-        for lag in lags:
-            for signal_column in signal_columns:
-                lag_feature_column = f'feature_{signal_column}_lag_{lag}'
-                # Set lag feature to None if lag > row_num in the test set
-                df_copy.loc[(df['sample'] == 'test') & (df_copy['row_num'] > lag), lag_feature_column] = None
-
-        # Fill forward the last known value for lags
-        if fill_lags:
-            df_copy[lag_feature_columns] = df_copy.groupby(group_columns)[lag_feature_columns].ffill()
-
-        # Drop the temporary row_num column
-        df_copy = df_copy.drop(columns=['row_num'])
+            # Fill forward the last known value for lags if requested
+            if fill_lags and lag_feature_columns:
+                for group_name, group_df in df_copy.groupby(group_columns):
+                    group_indices = group_df.index
+                    if len(group_indices) > 0:
+                        df_copy.loc[group_indices, lag_feature_columns] = \
+                            df_copy.loc[group_indices, lag_feature_columns].ffill()
+            
+            # Drop the temporary row_num column
+            df_copy = df_copy.drop(columns=['row_num'])
         
         return df_copy
 
@@ -435,49 +539,59 @@ class FeatureEngineering:
         Returns:
         pd.DataFrame: DataFrame with additional CV columns for each value column, joined back to the full DataFrame.
         """
-        # Copy the input DataFrame
+        # Avoid unnecessary copy if we only add columns
         result = df.copy()
 
-        # Ensure group_columns is a list
-        if isinstance(group_columns, str):
-            group_columns = [group_columns]
-        elif not isinstance(group_columns, list):
+        # Standardize inputs
+        group_columns = [group_columns] if isinstance(group_columns, str) else group_columns
+        value_columns = [value_columns] if isinstance(value_columns, str) else value_columns
+        
+        # Validate input types
+        if not isinstance(group_columns, list):
             raise ValueError("group_columns must be a list or a string.")
-
-        # Ensure value_columns is a list
-        if isinstance(value_columns, str):
-            value_columns = [value_columns]
-        elif not isinstance(value_columns, list):
+        if not isinstance(value_columns, list):
             raise ValueError("value_columns must be a list or a string.")
 
-        # Filter only for rows where sample is 'train'
-        train_data = df[df['sample'] == 'train']
-
+        # Create a mask for train data - avoid creating a separate DataFrame
+        train_mask = df['sample'] == 'train'
+        
+        # Process all value columns at once where possible
         for value_column in value_columns:
             if value_column not in df.columns:
                 print(f"Warning: Column '{value_column}' not found in the DataFrame.")
                 continue
 
-            # Exclude zero values and calculate the mean and standard deviation for each group
-            group_stats = (
-                train_data[train_data[value_column] != 0]
-                .groupby(group_columns)[value_column]
-                .agg(['mean', 'std'])
-                .reset_index()
-            )
+            # Create combined mask for non-zero values in train data
+            non_zero_train_mask = train_mask & (df[value_column] != 0)
+            
+            if non_zero_train_mask.sum() == 0:  # No valid data
+                # Create empty column with zeros
+                cov_column = f'feature_{value_column}_cov'
+                result[cov_column] = 0.0
+                continue
 
-            # Calculate the coefficient of variation (CV = std / mean)
+            # Calculate mean and std directly
+            stats_df = df.loc[non_zero_train_mask].groupby(group_columns)[value_column].agg(['mean', 'std'])
+            
+            # Some groups might have only one value or constant values, resulting in NaN std
+            # Replace NaN std with 0
+            stats_df['std'] = stats_df['std'].fillna(0)
+            
+            # Calculate CV (coefficient of variation)
             cov_column = f'feature_{value_column}_cov'
-
-            # Handle cases where mean = 0 to avoid division by zero
-            group_stats[cov_column] = group_stats['std'] / group_stats['mean']
-            group_stats[cov_column] = group_stats[cov_column].fillna(0)
-
-            # Drop unnecessary columns 'mean' and 'std' after calculation
-            group_stats = group_stats.drop(columns=['mean', 'std'], errors='ignore')
-
-            # Merge the CV back into the original DataFrame (result), keeping all original rows
-            result = result.merge(group_stats[group_columns + [cov_column]], on=group_columns, how='left')
+            stats_df[cov_column] = stats_df['std'] / stats_df['mean']
+            
+            # Handle division by zero or near-zero means
+            stats_df[cov_column] = stats_df[cov_column].fillna(0).replace([np.inf, -np.inf], 0)
+            
+            # Keep only the CV column for merging
+            stats_df = stats_df[[cov_column]]
+            
+            # Merge with original DataFrame using an efficient left join
+            result = result.merge(stats_df, left_on=group_columns, right_index=True, how='left')
+            
+            # Fill NaN values with 0 and ensure proper data type
+            result[cov_column] = result[cov_column].fillna(0).astype('float64')
 
         return result
 
@@ -759,12 +873,25 @@ class FeatureEngineering:
         # Create a boolean mask for rows where 'sample' is 'train'
         mask = df_copy['sample'] == 'train'
 
-        # Calculate and assign weights for 'train' samples
-        df_copy.loc[mask, 'train_weight'] = (
-            df_copy[mask]
-            .groupby(group_columns, group_keys=False)
-            .apply(compute_weights)
-        )
+        # Calculate and assign weights for 'train' samples in a more efficient way
+        train_data = df_copy[mask].copy()
+        
+        # Apply the compute_weights function to each group
+        for group_name, group_df in train_data.groupby(group_columns):
+            # Convert group_name to tuple if it's a single item
+            if not isinstance(group_name, tuple):
+                group_name = (group_name,)
+            
+            # Apply compute_weights to this group
+            weights = compute_weights(group_df)
+            
+            # Create a boolean mask to identify these rows in the original dataframe
+            group_mask = mask.copy()
+            for i, col in enumerate(group_columns):
+                group_mask &= (df_copy[col] == group_name[i])
+            
+            # Assign the weights
+            df_copy.loc[group_mask, 'train_weight'] = weights
 
         return df_copy
     
@@ -815,8 +942,24 @@ class FeatureEngineering:
                     group.loc[:first_test_index - 1, 'fcst_lag'] = np.nan
             return group
 
-        # Apply function to each group and cast to integer after filling NaN
-        df = df.groupby(group_columns, group_keys=False).apply(apply_fcst_lag)
+        # Initialize fcst_lag column with NaN
+        df['fcst_lag'] = np.nan
+        
+        # Process each group separately instead of using groupby.apply
+        for group_name, group_df in df.groupby(group_columns):
+            # Get indices of this group
+            group_indices = group_df.index
+            
+            # Find start index for target_sample
+            start_indices = group_df.index[group_df[sample_col] == target_sample]
+            
+            if len(start_indices) > 0:
+                first_test_index = start_indices[0]
+                # Calculate lag numbers for this group
+                test_indices = group_df.loc[first_test_index:].index
+                df.loc[test_indices, 'fcst_lag'] = range(1, len(test_indices) + 1)
+        
+        # Cast to integer after filling NaN
         df['fcst_lag'] = df['fcst_lag'].fillna(0).astype(int)
 
         return df

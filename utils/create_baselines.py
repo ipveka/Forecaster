@@ -27,6 +27,57 @@ class CreateBaselines:
         and LightGBM regression (LGBM).
         """
         pass
+        
+    # Main function to run baselines
+    def run_baselines(self, df, group_cols, date_col, signal_cols, baseline_types=['MA', 'LR', 'ML'], 
+                      window_size=13, feature_cols=None):
+        """
+        Main function to prepare baselines by calling specified baseline functions in order.
+        
+        Parameters:
+        df (pd.DataFrame): Input DataFrame containing the data
+        group_cols (list): Columns to group the data (e.g., ['client', 'warehouse', 'product'])
+        date_col (str): Column containing dates
+        signal_cols (list): List of signal columns to create baselines for
+        baseline_types (list): List of baseline types to create ('MA' for moving average, 'LR' for linear regression, 'ML' for LightGBM)
+        window_size (int): Window size for moving average baseline (default: 13)
+        feature_cols (list): Feature columns for regression models (required for 'LR' and 'ML' baseline types)
+        
+        Returns:
+        pd.DataFrame: Prepared DataFrame with baseline columns added
+        """
+        # Start function
+        print("Starting baseline creation...")
+        
+        # Make a copy of the input DataFrame to avoid modifying the original
+        result_df = df.copy()
+        
+        # Check if feature_cols is provided when LR or ML baselines are requested
+        if ('LR' in baseline_types or 'ML' in baseline_types) and feature_cols is None:
+            raise ValueError("feature_cols must be provided for 'LR' or 'ML' baseline types")
+        
+        # Create baselines based on user preferences
+        for baseline_type in baseline_types:
+            if baseline_type == 'MA':
+                print("Creating Moving Average (MA) baselines...")
+                result_df = self.create_ma_baseline(result_df, group_cols, date_col, signal_cols, window_size)
+                print("MA baselines created successfully.")
+                
+            elif baseline_type == 'LR':
+                print("Creating Linear Regression (LR) baselines...")
+                result_df = self.create_lr_baseline(result_df, group_cols, date_col, signal_cols, feature_cols)
+                print("LR baselines created successfully.")
+                
+            elif baseline_type == 'ML':
+                print("Creating LightGBM (ML) baselines...")
+                result_df = self.create_lgbm_baseline(result_df, group_cols, date_col, signal_cols, feature_cols)
+                print("ML baselines created successfully.")
+                
+            else:
+                print(f"Warning: Unknown baseline type '{baseline_type}'. Skipping.")
+        
+        print("Baseline creation completed.")
+        return result_df
 
     # MA Baseline
     def create_ma_baseline(self, df, group_cols, date_col, signal_cols, window_size):
@@ -75,7 +126,7 @@ class CreateBaselines:
         return final_df
 
     # LR Baseline
-    def create_lr_baseline(self, df, group_cols, date_col, signal_cols, feature_cols):
+    def create_lr_baseline(self, df, group_cols, date_col, signal_cols, feature_cols, debug=False):
         """
         Add linear regression (LR) baselines and feature baselines for each signal column to the test set.
         For the train set, store the actual values in the baseline columns.
@@ -140,7 +191,8 @@ class CreateBaselines:
                         baseline_preds.append(group_test)
 
                 # Print progress update for tracking large datasets
-                # print(f"Group {group_counter}/{total_groups} processed. Progress: {(group_counter / total_groups) * 100:.2f}%")
+                if debug:
+                    print(f"Group {group_counter}/{total_groups} processed. Progress: {(group_counter / total_groups) * 100:.2f}%")
 
             # Concatenate all group test predictions back into the test set
             if baseline_preds:
@@ -152,7 +204,7 @@ class CreateBaselines:
         return final_df
 
     # LGBM Baseline
-    def create_lgbm_baseline(self, df, group_cols, date_col, signal_cols, feature_cols):
+    def create_lgbm_baseline(self, df, group_cols, date_col, signal_cols, feature_cols, debug=False):
         """
         Add LightGBM regression baselines and feature baselines for each signal column to the test set.
         For the train set, store the actual values in the baseline columns.
@@ -214,7 +266,8 @@ class CreateBaselines:
                         baseline_preds.append(group_test)
 
                 # Optionally, print progress for large datasets
-                # print(f"Group {group_counter}/{total_groups} processed. Progress: {(group_counter / total_groups) * 100:.2f}%")
+                if debug:
+                    print(f"Group {group_counter}/{total_groups} processed. Progress: {(group_counter / total_groups) * 100:.2f}%")
 
             # Concatenate all group test predictions back into the test set
             if baseline_preds:
