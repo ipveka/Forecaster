@@ -131,20 +131,51 @@ The repository is organized into several folders for easy navigation:
   Contains both raw and processed datasets. The processed datasets are ready for model training following data cleaning and feature engineering.
 
 - **`docs`**  
-  Comprehensive project documentation, detailing the classes, functions, architecture, and usage guidelines.
+  Comprehensive project documentation, detailing the classes, functions, architecture, and usage guidelines:
+  - **`DataPreparation.md`**: Documentation for the DataPreparation class
+  - **`FeatureEngineering.md`**: Documentation for the FeatureEngineering class
+  - **`CreateBaselines.md`**: Documentation for the CreateBaselines class
+  - **`Forecaster.md`**: Documentation for the Forecaster class
+  - **`Evaluator.md`**: Documentation for the Evaluator class
+  - **`Runner.md`**: Documentation for the Runner class, which orchestrates the entire pipeline
+  - **`ForecasterUtils.md`**: Documentation for utility functions in the forecaster_utils module
 
 - **`notebooks`**  
   Jupyter notebooks demonstrating the Forecaster workflow, including:
 
   - **`data_preparation`**: Walks through each step of data preparation, feature engineering, and baseline creation individually, allowing users to customize executions.
   - **`forecasting`**: Covers model evaluation, hyperparameter tuning, feature selection, and forecasting using `Forecaster` class, with insights on both training and validation processes.
-  - **`runner`**: An end-to-end workflow notebook utilizing the `run_data_preparation` and `run_feature_engineering` orchestrators to streamline the entire process, combined with `Forecaster` and `Evaluator` calls to create a complete forecasting pipeline.
+  - **`runner`**: An end-to-end workflow notebook utilizing the `Runner` class to streamline the entire process, creating a complete forecasting pipeline.
 
-- **`submissions`**  
-  Contains the forecast model outputs, including predictions and performance metrics.
+- **`src`**  
+  Contains the main executable scripts, including `run_forecaster.py` which demonstrates how to use the Runner class.
 
 - **`utils`**  
   The utility folder holding the main classes, auxiliary functions, and plotting tools for the project.
+
+---
+
+## 🔄 Recent Improvements
+
+### Parameter Standardization
+
+The framework has been enhanced with a standardized parameter naming convention for clarity and consistency:
+
+- **`dp_window_size`**: Window size for data preparation operations (formerly `ma_window_size`)
+- **`fe_window_size`**: Window sizes for feature engineering calculations (formerly `window_sizes`)
+- **`bs_window_size`**: Window size for baseline creation (formerly `window_size`)
+
+This naming convention makes it clear which component each parameter belongs to, improving code readability and maintenance.
+
+### Frequency-Based Parameter Management
+
+The framework now intelligently manages parameters based on the detected frequency of the data:
+
+- Automatic frequency detection when not explicitly provided
+- Retrieval of optimal parameters from `get_frequency_params` based on the frequency
+- Different parameter sets for daily ('D'), weekly ('W'), and monthly ('M') data
+
+This ensures that appropriate parameters are used regardless of the time series frequency, enhancing adaptability across different datasets.
 
 ---
 

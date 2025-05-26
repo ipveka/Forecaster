@@ -5,6 +5,7 @@ Runner script for the Forecaster package.
 This script demonstrates how to use the Runner class with different data frequencies.
 """
 
+# General libraries
 import os
 import sys
 import pandas as pd
@@ -14,14 +15,20 @@ import logging
 import argparse
 import time
 
-# Now import from absolute paths
-from src.utils.forecaster_utils import (
+# Add the project root directory to the Python path
+sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+
+# Import utility functions
+from utils.forecaster_utils import (
     generate_sample_data,
     visualize_data,
     visualize_forecasts_by_cutoff,
     save_results,
     get_frequency_params
 )
+
+# Import Runner class from utils package
+from utils.runner import Runner
 
 # Configure logging
 logging.basicConfig(
@@ -40,7 +47,8 @@ def main():
     # Parse command line arguments
     parser = argparse.ArgumentParser(description='Run the Forecaster pipeline')
     parser.add_argument('--freq', type=str, default='W', help='Data frequency: D (daily), W (weekly), or M (monthly)')
-    parser.add_argument('--n_cutoffs', type=int, default=1, help='Number of cutoffs for backtesting')
+    parser.add_argument('--horizon', type=int, default=12, help='Horizon for forecasting')
+    parser.add_argument('--n_cutoffs', type=int, default=3, help='Number of cutoffs for backtesting')
     parser.add_argument('--tune', action='store_true', help='Enable hyperparameter tuning')
     parser.add_argument('--model', type=str, default='LGBM', choices=['LGBM', 'RF', 'GBM', 'ADA', 'LR'], help='Model to use for forecasting')
     args = parser.parse_args()
@@ -71,10 +79,6 @@ def main():
     # Visualize the raw data
     visualize_data(df, args.freq, OUTPUTS_DIR)
     
-    # Pre-create training_group column to ensure it exists
-    df['training_group'] = df['product'].astype('category').cat.codes + 1
-    logging.info(f"Pre-created training_group column with {df['training_group'].nunique()} unique values")
-    
     # Configure the Runner
     runner = Runner()
     
@@ -93,31 +97,30 @@ def main():
         
         # Data preparation parameters
         target='sales',
-        horizon=params['horizon'],
+        horizon=args.horizon,
         freq=args.freq,
         n_cutoffs=args.n_cutoffs,
         complete_dataframe=True,
-        smoothing=True,
-        ma_window_size=params['ma_window_size'],
-        fill_na=True,
+        smoothing=False,
+        dp_window_size=params['dp_window_size'],
         
         # Feature engineering parameters
-        window_sizes=params['window_sizes'],
+        fe_window_size=params['fe_window_size'],
         lags=params['lags'],
-        fill_lags=True,  # Fill lag values to avoid NaNs
+        fill_lags=True,
         
         # Baseline parameters
-        baseline_types=['MA'],  # Use only MA baseline for simplicity
-        window_size=params['window_size'],
+        baseline_types=['MA'],
+        bs_window_size=params['bs_window_size'],
         
         # Forecaster parameters
         model=args.model,
-        training_group='training_group',  # Use the pre-created training group column
+        training_group='training_group',
         tune_hyperparameters=args.tune,
-        use_feature_selection=True,
-        n_best_features=10,
+        use_feature_selection=False,
+        n_best_features=15,
         use_guardrail=False,
-        use_parallel=True
+        use_parallel=False
     )
     
     # Visualize the forecasts with cutoff indicators and train/test separation

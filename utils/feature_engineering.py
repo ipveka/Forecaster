@@ -36,7 +36,7 @@ class FeatureEngineering:
 
     # Prepare data
     def run_feature_engineering(self, df, group_cols, date_col, target, freq=None,
-                                window_sizes=(4, 13), lags=(4, 13), fill_lags=False,
+                                fe_window_size=None, lags=None, fill_lags=False,
                                 n_clusters=10):
         """
         Main function to prepare the data by calling all internal functions in order.
@@ -47,7 +47,7 @@ class FeatureEngineering:
         date_col (str): Column containing dates
         target (str): Target variable
         freq (str): Frequency of the data
-        window_sizes (tuple): Window sizes for stats
+        fe_window_size (tuple): Window sizes for stats
         lags (tuple): Lag values for creating lag features
         fill_lags (bool): Whether to fill forward lags
         n_clusters (int): Number of groups for quantile clustering
@@ -65,6 +65,19 @@ class FeatureEngineering:
         if freq is None:
             freq = self.detect_frequency(df, date_col)
             print(f"Auto-detected frequency: {freq}")
+            
+        # Get frequency-specific parameters
+        from utils.forecaster_utils import get_frequency_params
+        freq_params = get_frequency_params(freq)
+        
+        # Use frequency-specific parameters if not provided by user
+        if fe_window_size is None:
+            fe_window_size = freq_params['fe_window_size']
+            print(f"Using frequency-based window size for features: {fe_window_size}")
+            
+        if lags is None:
+            lags = freq_params['lags']
+            print(f"Using frequency-based lags: {lags}")
 
         # Find categorical columns
         signal_cols = [col for col in df.select_dtypes(include=['float64']).columns]
@@ -95,11 +108,11 @@ class FeatureEngineering:
         print(f"Identified signal columns: {signal_cols}")
 
         # Add MA features
-        df = self.create_ma_features(df, group_cols, signal_cols, window_sizes)
+        df = self.create_ma_features(df, group_cols, signal_cols, fe_window_size)
         print("Added moving average features.")
 
         # Add moving stats
-        df = self.create_moving_stats(df, group_cols, signal_cols, window_sizes)
+        df = self.create_moving_stats(df, group_cols, signal_cols, fe_window_size)
         print("Added moving statistics.")
 
         # Add lag features if any feature columns are found
@@ -352,7 +365,7 @@ class FeatureEngineering:
         return df
 
     # Calculate MA features
-    def create_ma_features(self, df, group_columns, signal_columns, window_sizes):
+    def create_ma_features(self, df, group_columns, signal_columns, fe_window_size):
         """
         Calculate moving averages for given signal columns, grouped by group columns, for multiple window sizes.
 
@@ -360,7 +373,7 @@ class FeatureEngineering:
         - df: pandas DataFrame
         - group_columns: list of columns to group by
         - signal_columns: list of columns to calculate moving averages on
-        - window_sizes: list of integers, each representing a window size for the moving average
+        - fe_window_size: list of integers, each representing a window size for the moving average
 
         Returns:
         - pandas DataFrame with new columns for moving averages for each window size
@@ -371,7 +384,7 @@ class FeatureEngineering:
         # Standardize inputs
         group_columns = [group_columns] if isinstance(group_columns, str) else group_columns
         signal_columns = [signal_columns] if isinstance(signal_columns, str) else signal_columns
-        window_sizes = [window_sizes] if isinstance(window_sizes, (int, float)) else window_sizes
+        fe_window_size = [fe_window_size] if isinstance(fe_window_size, (int, float)) else fe_window_size
         
         # Validate input types
         if not isinstance(group_columns, list):
@@ -384,7 +397,7 @@ class FeatureEngineering:
         for signal_column in signal_columns:
             # Group once per signal column to avoid redundant groupby operations
             grouped = df_copy.groupby(group_columns)[signal_column]
-            for window_size in window_sizes:
+            for window_size in fe_window_size:
                 ma_column_name = f'{signal_column}_ma_{window_size}'
                 df_copy[ma_column_name] = grouped.transform(
                     lambda x: x.rolling(window=window_size, min_periods=1).mean()
@@ -393,7 +406,7 @@ class FeatureEngineering:
         return df_copy
 
     # Calculate moving stats
-    def create_moving_stats(self, df, group_columns, signal_columns, window_sizes):
+    def create_moving_stats(self, df, group_columns, signal_columns, fe_window_size):
         """
         Calculate moving minimum and maximum for given signal columns, grouped by group columns, for multiple window sizes.
 
@@ -401,7 +414,7 @@ class FeatureEngineering:
         - df: pandas DataFrame
         - group_columns: list of columns to group by
         - signal_columns: list of columns to calculate moving min/max on
-        - window_sizes: list of integers, each representing a window size for the moving min/max
+        - fe_window_size: list of integers, each representing a window size for the moving min/max
 
         Returns:
         - pandas DataFrame with new columns for moving minimum and maximum for each window size
@@ -412,7 +425,7 @@ class FeatureEngineering:
         # Standardize inputs
         group_columns = [group_columns] if isinstance(group_columns, str) else group_columns
         signal_columns = [signal_columns] if isinstance(signal_columns, str) else signal_columns
-        window_sizes = [window_sizes] if isinstance(window_sizes, (int, float)) else window_sizes
+        fe_window_size = [fe_window_size] if isinstance(fe_window_size, (int, float)) else fe_window_size
         
         # Validate input types
         if not isinstance(group_columns, list):
@@ -425,7 +438,7 @@ class FeatureEngineering:
         for signal_column in signal_columns:
             # Group once per signal column to avoid redundant groupby operations
             grouped = df_copy.groupby(group_columns)[signal_column]
-            for window_size in window_sizes:
+            for window_size in fe_window_size:
                 # Create new column names for moving minimum and maximum
                 min_column_name = f'{signal_column}_min_{window_size}'
                 max_column_name = f'{signal_column}_max_{window_size}'

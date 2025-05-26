@@ -447,7 +447,7 @@ class Forecaster:
         X_train, y_train, X_test, test_idx, train_idx = self._prepare_data(df, features, target_col)
 
         # Report NA and Infs
-        self.calculate_nan_inf_percentage(X_train, y_train)
+        # self.calculate_nan_inf_percentage(X_train, y_train)
 
         # Fill NA in y
         y_train = y_train.fillna(0)

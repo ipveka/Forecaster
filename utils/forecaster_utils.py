@@ -46,7 +46,7 @@ def generate_sample_data(freq='W', periods=104):
     dates = pd.date_range(start=start_date, periods=periods, freq=freq)
     
     # Create product IDs and store IDs
-    product_ids = ['P001', 'P002', 'P003']
+    product_ids = ['P001', 'P002', 'P003', 'P004', 'P005']
     store_ids = ['S01', 'S02']
     
     # Create all combinations of dates, products, and stores
@@ -155,7 +155,7 @@ def visualize_data(df, freq, outputs_dir, target_col='sales'):
     plt.tight_layout()
     
     # Save the visualization
-    fig_path = os.path.join(outputs_dir, f'data_visualization_{freq}.png')
+    fig_path = os.path.join(outputs_dir, 'data_visualization.png')
     plt.savefig(fig_path)
     logging.info(f"Saved visualization to {fig_path}")
     plt.close()
@@ -164,6 +164,7 @@ def visualize_data(df, freq, outputs_dir, target_col='sales'):
 def visualize_forecasts_by_cutoff(df, outputs_dir, target_col='sales', pred_col='prediction'):
     """
     Create visualizations of the forecasts with one plot per cutoff and save to outputs folder.
+    Also creates a combined visualization with all cutoffs.
     
     Parameters:
     -----------
@@ -192,130 +193,77 @@ def visualize_forecasts_by_cutoff(df, outputs_dir, target_col='sales', pred_col=
     cutoffs = df['cutoff'].unique()
     logging.info(f"Creating forecast visualizations for {len(cutoffs)} cutoffs")
     
-    # Create one visualization per cutoff
-    for cutoff_date in cutoffs:
-        cutoff_df = df[df['cutoff'] == cutoff_date].copy()
+    # Create a combined visualization with one subplot per cutoff
+    if len(cutoffs) > 0:
+        # Create a single figure with subplots (one per cutoff)
+        fig, axes = plt.subplots(len(cutoffs), 1, figsize=(15, 7 * len(cutoffs)))
         
-        # Create a figure with three subplots
-        fig, axes = plt.subplots(3, 1, figsize=(15, 18))
-        cutoff_date_str = pd.Timestamp(cutoff_date).strftime('%Y-%m-%d')
+        # If there's only one cutoff, make axes iterable
+        if len(cutoffs) == 1:
+            axes = [axes]
         
-        # Overall plot
-        overall_avg = cutoff_df.groupby('date')[[target_col, pred_col]].mean().reset_index()
+        # Look for baseline column if it exists
+        baseline_cols = [col for col in df.columns if col.startswith(f'baseline_{target_col}_ma_')]
+        baseline_col = baseline_cols[0] if baseline_cols else None
         
-        # Split train/test data for better visualization
-        train_data = overall_avg[cutoff_df['sample'].iloc[0] == 'train']
-        test_data = overall_avg[cutoff_df['sample'].iloc[0] == 'test']
-        
-        # Plot train data
-        if not train_data.empty:
-            axes[0].plot(train_data['date'], train_data[target_col], 'b-', 
+        # Plot each cutoff in its own subplot
+        for i, cutoff_date in enumerate(cutoffs):
+            ax = axes[i]
+            cutoff_df = df[df['cutoff'] == cutoff_date].copy()
+            cutoff_date_str = pd.Timestamp(cutoff_date).strftime('%Y-%m-%d')
+            
+            # Make sure sample column exists
+            if 'sample' not in cutoff_df.columns:
+                cutoff_timestamp = pd.Timestamp(cutoff_date)
+                cutoff_df['sample'] = np.where(cutoff_df['date'] <= cutoff_timestamp, 'train', 'test')
+            
+            # Group by date and sample to get sum by train/test split
+            data_by_sample = cutoff_df.groupby(['date', 'sample'])[[target_col, pred_col]].sum().reset_index()
+            if baseline_col and baseline_col in cutoff_df.columns:
+                # Include baseline in the groupby
+                baseline_data = cutoff_df.groupby(['date', 'sample'])[baseline_col].sum().reset_index()
+                # Merge baseline data with main data
+                data_by_sample = pd.merge(data_by_sample, baseline_data, on=['date', 'sample'], how='left')
+            
+            # Get train and test data using the sample column
+            train_data = data_by_sample[data_by_sample['sample'] == 'train']
+            test_data = data_by_sample[data_by_sample['sample'] == 'test']
+            
+            # Plot train data
+            if not train_data.empty:
+                ax.plot(train_data['date'], train_data[target_col], 'b-', 
                         label=f'Actual (Train)', linewidth=2)
-        
-        # Plot test data
-        if not test_data.empty:
-            axes[0].plot(test_data['date'], test_data[target_col], 'g-', 
+            
+            # Plot test data and predictions
+            if not test_data.empty:
+                ax.plot(test_data['date'], test_data[target_col], 'g-', 
                         label=f'Actual (Test)', linewidth=2)
-            axes[0].plot(test_data['date'], test_data[pred_col], 'r--', 
+                ax.plot(test_data['date'], test_data[pred_col], 'r--', 
                         label=f'Predicted', linewidth=2)
-        
-        # Add vertical line for cutoff date
-        axes[0].axvline(x=cutoff_date, color='purple', linestyle='--', linewidth=2, 
+                
+                # Plot baseline if available
+                if baseline_col and baseline_col in data_by_sample.columns:
+                    ax.plot(test_data['date'], test_data[baseline_col], 'y--', 
+                            label=f'Baseline (MA)', linewidth=1.5, alpha=0.7)
+            
+            # Add vertical line for cutoff date
+            ax.axvline(x=cutoff_date, color='purple', linestyle='--', linewidth=2, 
                       label=f'Cutoff: {cutoff_date_str}')
-        
-        axes[0].set_title(f'Overall Forecast - Cutoff: {cutoff_date_str}')
-        axes[0].set_xlabel('Date')
-        axes[0].set_ylabel(target_col.capitalize())
-        axes[0].legend()
-        axes[0].grid(True)
-        
-        # Plot by product
-        # Get product data
-        product_df = cutoff_df.groupby(['date', 'product', 'sample'])[[target_col, pred_col]].mean().reset_index()
-        
-        # Get unique products
-        products = product_df['product'].unique()
-        colors = ['blue', 'green', 'red', 'cyan', 'magenta', 'orange']
-        
-        for i, product in enumerate(products):
-            product_data = product_df[product_df['product'] == product]
-            color = colors[i % len(colors)]
             
-            # Split train/test data for this product
-            train_product = product_data[product_data['sample'] == 'train']
-            test_product = product_data[product_data['sample'] == 'test']
-            
-            # Plot train data
-            if not train_product.empty:
-                axes[1].plot(train_product['date'], train_product[target_col], 
-                            color=color, linestyle='-',
-                            label=f'{product} Actual (Train)')
-            
-            # Plot test data
-            if not test_product.empty:
-                axes[1].plot(test_product['date'], test_product[target_col], 
-                            color=color, linestyle='-', linewidth=2,
-                            label=f'{product} Actual (Test)')
-                axes[1].plot(test_product['date'], test_product[pred_col], 
-                            color=color, linestyle='--', linewidth=2,
-                            label=f'{product} Predicted')
+            # Plot settings
+            ax.set_title(f'Forecast Summary - Cutoff: {cutoff_date_str}')
+            ax.set_xlabel('Date')
+            ax.set_ylabel(target_col.capitalize())
+            ax.legend()
+            ax.grid(True)
         
-        # Add vertical line for cutoff date
-        axes[1].axvline(x=cutoff_date, color='purple', linestyle='--', linewidth=2, 
-                      label=f'Cutoff: {cutoff_date_str}')
-        
-        axes[1].set_title(f'Forecast by Product - Cutoff: {cutoff_date_str}')
-        axes[1].set_xlabel('Date')
-        axes[1].set_ylabel(target_col.capitalize())
-        axes[1].legend()
-        axes[1].grid(True)
-        
-        # Plot by store
-        # Get store data
-        store_df = cutoff_df.groupby(['date', 'store', 'sample'])[[target_col, pred_col]].mean().reset_index()
-        
-        # Get unique stores
-        stores = store_df['store'].unique()
-        
-        for i, store in enumerate(stores):
-            store_data = store_df[store_df['store'] == store]
-            color = colors[i % len(colors)]
-            
-            # Split train/test data for this store
-            train_store = store_data[store_data['sample'] == 'train']
-            test_store = store_data[store_data['sample'] == 'test']
-            
-            # Plot train data
-            if not train_store.empty:
-                axes[2].plot(train_store['date'], train_store[target_col], 
-                           color=color, linestyle='-',
-                           label=f'{store} Actual (Train)')
-            
-            # Plot test data
-            if not test_store.empty:
-                axes[2].plot(test_store['date'], test_store[target_col], 
-                           color=color, linestyle='-', linewidth=2,
-                           label=f'{store} Actual (Test)')
-                axes[2].plot(test_store['date'], test_store[pred_col], 
-                           color=color, linestyle='--', linewidth=2,
-                           label=f'{store} Predicted')
-        
-        # Add vertical line for cutoff date
-        axes[2].axvline(x=cutoff_date, color='purple', linestyle='--', linewidth=2, 
-                      label=f'Cutoff: {cutoff_date_str}')
-        
-        axes[2].set_title(f'Forecast by Store - Cutoff: {cutoff_date_str}')
-        axes[2].set_xlabel('Date')
-        axes[2].set_ylabel(target_col.capitalize())
-        axes[2].legend()
-        axes[2].grid(True)
-        
+        # Overall layout
         plt.tight_layout()
         
-        # Save the visualization
-        fig_path = os.path.join(outputs_dir, f'forecast_cutoff_{cutoff_date_str}_{freq}.png')
+        # Save the combined visualization
+        fig_path = os.path.join(outputs_dir, 'forecast_all_cutoffs.png')
         plt.savefig(fig_path)
-        logging.info(f"Saved forecast visualization for cutoff {cutoff_date_str} to {fig_path}")
+        logging.info(f"Saved combined cutoff visualization to {fig_path}")
         plt.close()
 
 
@@ -337,7 +285,7 @@ def save_results(df, metrics, freq, outputs_dir):
     logging.info("Saving results...")
     
     # Save the full DataFrame
-    df_path = os.path.join(outputs_dir, f'forecaster_results_{freq}.csv')
+    df_path = os.path.join(outputs_dir, 'forecaster_results.csv')
     df.to_csv(df_path, index=False)
     logging.info(f"Saved full results to {df_path}")
     
@@ -349,7 +297,7 @@ def save_results(df, metrics, freq, outputs_dir):
             for metric, value in model_metrics.items()
         }, orient='columns')
         
-        metrics_path = os.path.join(outputs_dir, f'forecaster_metrics_{freq}.csv')
+        metrics_path = os.path.join(outputs_dir, 'forecaster_metrics.csv')
         metrics_df.to_csv(metrics_path, index=False)
         logging.info(f"Saved metrics to {metrics_path}")
         
@@ -368,7 +316,7 @@ def save_results(df, metrics, freq, outputs_dir):
                 metrics_by_cutoff[str(cutoff)] = cutoff_metrics
             
             cutoff_metrics_df = pd.DataFrame.from_dict(metrics_by_cutoff, orient='index')
-            cutoff_metrics_path = os.path.join(outputs_dir, f'cutoff_stats_{freq}.csv')
+            cutoff_metrics_path = os.path.join(outputs_dir, 'cutoff_stats.csv')
             cutoff_metrics_df.to_csv(cutoff_metrics_path)
             logging.info(f"Saved cutoff statistics to {cutoff_metrics_path}")
 
@@ -388,29 +336,32 @@ def get_frequency_params(freq):
         Dictionary of parameters for the given frequency
     """
     if freq == 'D':
+        # Daily 
         return {
-            'horizon': 7,
-            'window_size': 7,
-            'ma_window_size': 7,
-            'window_sizes': (3, 7),
-            'lags': (1, 7),
+            'horizon': 28,
+            'dp_window_size': 14,
+            'fe_window_size': (14, 28),
+            'bs_window_size': 14,
+            'lags': (7, 14, 28, 35),
             'periods': 365
         }
     elif freq == 'W':
+        # Weekly
+        return {
+            'horizon': 13,
+            'dp_window_size': 13,
+            'fe_window_size': (4, 13),
+            'bs_window_size': 13,
+            'lags': (13, 26, 39, 52),
+            'periods': 52
+        }
+    else:  
+        # Monthly
         return {
             'horizon': 4,
-            'window_size': 4,
-            'ma_window_size': 4,
-            'window_sizes': (2, 8),
-            'lags': (1, 8),
-            'periods': 104
-        }
-    else:  # Monthly
-        return {
-            'horizon': 3,
-            'window_size': 3,
-            'ma_window_size': 3,
-            'window_sizes': (2, 12),
-            'lags': (1, 12),
-            'periods': 36
+            'dp_window_size': 4,
+            'fe_window_size': (2, 6),
+            'bs_window_size': 4,
+            'lags': (4, 8, 12),
+            'periods': 12
         }

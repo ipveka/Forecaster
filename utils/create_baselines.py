@@ -29,8 +29,8 @@ class CreateBaselines:
         pass
         
     # Main function to run baselines
-    def run_baselines(self, df, group_cols, date_col, signal_cols, baseline_types=['MA', 'LR', 'ML'], 
-                      window_size=13, feature_cols=None):
+    def run_baselines(self, df, group_cols, date_col, signal_cols, baseline_types=['MA'], 
+                      bs_window_size=None, feature_cols=None, freq=None):
         """
         Main function to prepare baselines by calling specified baseline functions in order.
         
@@ -40,7 +40,7 @@ class CreateBaselines:
         date_col (str): Column containing dates
         signal_cols (list): List of signal columns to create baselines for
         baseline_types (list): List of baseline types to create ('MA' for moving average, 'LR' for linear regression, 'ML' for LightGBM)
-        window_size (int): Window size for moving average baseline (default: 13)
+        bs_window_size (int): Window size for moving average baseline (default: 13)
         feature_cols (list): Feature columns for regression models (required for 'LR' and 'ML' baseline types)
         
         Returns:
@@ -48,6 +48,15 @@ class CreateBaselines:
         """
         # Start function
         print("Starting baseline creation...")
+        
+        # Get frequency-specific parameters
+        from utils.forecaster_utils import get_frequency_params
+        freq_params = get_frequency_params(freq)
+        
+        # Use frequency-specific parameters if not provided by user
+        if bs_window_size is None:
+            bs_window_size = freq_params['bs_window_size']
+            print(f"Using frequency-based window size for baselines: {bs_window_size}")
         
         # Make a copy of the input DataFrame to avoid modifying the original
         result_df = df.copy()
@@ -60,7 +69,7 @@ class CreateBaselines:
         for baseline_type in baseline_types:
             if baseline_type == 'MA':
                 print("Creating Moving Average (MA) baselines...")
-                result_df = self.create_ma_baseline(result_df, group_cols, date_col, signal_cols, window_size)
+                result_df = self.create_ma_baseline(result_df, group_cols, date_col, signal_cols, bs_window_size)
                 print("MA baselines created successfully.")
                 
             elif baseline_type == 'LR':
@@ -80,7 +89,7 @@ class CreateBaselines:
         return result_df
 
     # MA Baseline
-    def create_ma_baseline(self, df, group_cols, date_col, signal_cols, window_size):
+    def create_ma_baseline(self, df, group_cols, date_col, signal_cols, bs_window_size):
         """
         Add moving average (MA) baselines and feature baselines for each signal column to the test set.
 
@@ -90,7 +99,7 @@ class CreateBaselines:
         group_cols (list): The list of columns to group by (e.g., ['client', 'warehouse', 'product']).
         date_col (str): The name of the date column.
         signal_cols (list): The list of signal columns to use for calculating the baselines.
-        window_size (int): The size of the moving average window.
+        bs_window_size (int): The size of the moving average window.
 
         Returns:
         pd.DataFrame: A DataFrame with additional columns: 'baseline_{signal_col}' and 'feature_baseline_{signal_col}'
@@ -107,7 +116,7 @@ class CreateBaselines:
         for signal_col in signal_cols:
             # Calculate the rolling mean (moving average) for each group and signal column
             train_df[f'feature_baseline_{signal_col}'] = train_df.groupby(group_cols)[signal_col].transform(
-                lambda x: x.rolling(window_size, min_periods=1).mean())
+                lambda x: x.rolling(bs_window_size, min_periods=1).mean())
 
             # Extract the last moving average value from the training data for each group to apply to the test set
             last_ma_values = train_df.groupby(group_cols)[f'feature_baseline_{signal_col}'].last().reset_index()

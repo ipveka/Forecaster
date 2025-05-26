@@ -34,8 +34,8 @@ class DataPreparation:
     def __init__(self):
         pass
 
-    def run_data_preparation(self, df, group_cols, date_col, target, horizon, freq=None, complete_dataframe=True,
-                             smoothing=True, ma_window_size=13, n_cutoffs=13):
+    def run_data_preparation(self, df, group_cols, date_col, target, horizon=None, freq=None, complete_dataframe=True,
+                             smoothing=True, dp_window_size=None, n_cutoffs=1):
         """
         Main function to prepare the data by calling all internal functions in order.
 
@@ -44,11 +44,11 @@ class DataPreparation:
         group_cols (list): Columns to group the data
         date_col (str): Column containing dates
         target (str): Target variable
-        horizon (int): Forecasting horizon
+        horizon (int, optional): Forecasting horizon. If None, it will be determined by frequency.
         freq (str, optional): Frequency of the data. If None, it will be auto-detected.
         complete_dataframe (bool): Whether to use complete_dataframe function
         smoothing (bool): Whether to smooth signals or not
-        ma_window_size (int): Window size for smoothing
+        dp_window_size (int, optional): Window size for smoothing. If None, it will be determined by frequency.
         n_cutoffs (int): Number of cutoffs for backtesting
 
         Returns:
@@ -64,6 +64,19 @@ class DataPreparation:
         if freq is None:
             freq = self.detect_frequency(df, date_col)
             print(f"Auto-detected frequency: {freq}")
+            
+        # Get frequency-specific parameters
+        from utils.forecaster_utils import get_frequency_params
+        freq_params = get_frequency_params(freq)
+        
+        # Use frequency-specific parameters if not provided by user
+        if horizon is None:
+            horizon = freq_params['horizon']
+            print(f"Using frequency-based horizon: {horizon}")
+            
+        if dp_window_size is None:
+            dp_window_size = freq_params['dp_window_size']
+            print(f"Using frequency-based window size for smoothing: {dp_window_size}")
 
         # Complete logic
         if complete_dataframe:
@@ -76,8 +89,8 @@ class DataPreparation:
 
         # Smoothing of signals
         if smoothing:
-            df = self.smoothing(df, group_cols, date_col, signal_cols, ma_window_size)
-            print(f"Applied smoothing with a moving average window size of {ma_window_size}.")
+            df = self.smoothing(df, group_cols, date_col, signal_cols, dp_window_size)
+            print(f"Applied smoothing with a moving average window size of {dp_window_size}.")
 
         # Get last cutoffs
         cutoff_dates = self.get_first_dates_last_n_months(df, date_col, n_cutoffs)
@@ -223,7 +236,7 @@ class DataPreparation:
         return completed_df
 
     # Smoothing (optimized for performance)
-    def smoothing(self, df, group_columns, date_column, signal_columns, ma_window_size=13):
+    def smoothing(self, df, group_columns, date_column, signal_columns, dp_window_size=13):
         """
         Fill missing values in signal columns using a rolling moving average, calculated for each group.
         Optimized version using vectorized operations for better performance.
@@ -233,7 +246,7 @@ class DataPreparation:
         group_columns (list): List of columns to group the data by (e.g., ['client', 'warehouse']).
         date_column (str): Column name representing the date (used to sort the data).
         signal_columns (list): List of signal columns where missing values will be filled (e.g., ['sales', 'price']).
-        ma_window_size (int): The window size for the moving average. Default is 13.
+        dp_window_size (int): The window size for the moving average. Default is 13.
 
         Returns:
         pd.DataFrame: A new dataframe with additional columns for each signal, where missing values have been filled.
@@ -255,7 +268,7 @@ class DataPreparation:
             # Use transform to apply the rolling mean to each group in one operation
             # This is more efficient than looping through each group
             df_copy[filled_signal_column] = df_copy.groupby(group_columns)[signal_column].transform(
-                lambda x: x.fillna(x.rolling(window=ma_window_size, min_periods=1).mean())
+                lambda x: x.fillna(x.rolling(window=dp_window_size, min_periods=1).mean())
             )
 
             # Ensure that the filled values are greater than or equal to zero
