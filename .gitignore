@@ -17,3 +17,6 @@ __pycache__/
 # Ignore all Excel files (both .xls and .xlsx)
 *.xls
 *.xlsx
+
+# Ignore all PNG files
+*.png
