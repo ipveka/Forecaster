@@ -16,7 +16,7 @@ import logging
 plt.style.use('seaborn-v0_8-whitegrid')
 sns.set_context("talk")
 
-def generate_sample_data(freq='W', periods=104):
+def generate_sample_data(freq='W', periods=156):
     """
     Generate sample time series data with the specified frequency.
     
@@ -34,13 +34,13 @@ def generate_sample_data(freq='W', periods=104):
     """
     logging.info(f"Generating sample {freq} data with {periods} periods")
     
-    # Set start date based on frequency
+    # Set start date based on frequency (3 years back from 2022)
     if freq == 'D':
-        start_date = datetime(2022, 1, 1)
+        start_date = datetime(2019, 1, 1)
     elif freq == 'W':
-        start_date = datetime(2022, 1, 3)  # Sunday
+        start_date = datetime(2019, 1, 6)
     else:  # Monthly
-        start_date = datetime(2022, 1, 31)
+        start_date = datetime(2019, 1, 31)
     
     # Create date range
     dates = pd.date_range(start=start_date, periods=periods, freq=freq)
@@ -62,9 +62,9 @@ def generate_sample_data(freq='W', periods=104):
                 
                 # Add product-specific trend
                 if product_id == 'P001':
-                    trend = 0.1 * (date - start_date).days / 30  # Increasing trend
+                    trend = 0.1 * (date - start_date).days / 30 
                 elif product_id == 'P002':
-                    trend = -0.05 * (date - start_date).days / 30  # Decreasing trend
+                    trend = -0.05 * (date - start_date).days / 30 
                 else:
                     trend = 0  # Flat trend
                 
@@ -95,8 +95,8 @@ def generate_sample_data(freq='W', periods=104):
                     'date': date,
                     'product': product_id,
                     'store': store_id,
-                    'sales': max(0, sales),  # Ensure non-negative
-                    'inventory': max(0, inventory)  # Ensure non-negative
+                    'sales': max(0, sales),
+                    'inventory': max(0, inventory)
                 }
                 records.append(record)
     
@@ -343,7 +343,7 @@ def get_frequency_params(freq):
             'fe_window_size': (14, 28),
             'bs_window_size': 14,
             'lags': (7, 14, 28, 35),
-            'periods': 365
+            'periods': 1095  # 3 years of daily data
         }
     elif freq == 'W':
         # Weekly
@@ -353,7 +353,7 @@ def get_frequency_params(freq):
             'fe_window_size': (4, 13),
             'bs_window_size': 13,
             'lags': (13, 26, 39, 52),
-            'periods': 52
+            'periods': 156  # 3 years of weekly data
         }
     else:  
         # Monthly
@@ -363,5 +363,5 @@ def get_frequency_params(freq):
             'fe_window_size': (2, 6),
             'bs_window_size': 4,
             'lags': (4, 8, 12),
-            'periods': 12
+            'periods': 36  # 3 years of monthly data
         }

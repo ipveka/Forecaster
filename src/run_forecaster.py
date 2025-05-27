@@ -74,7 +74,7 @@ def main():
     start_time = time.time()
     
     # Generate sample data
-    df = generate_sample_data(freq=args.freq, periods=params['periods'])
+    df = generate_sample_data(freq=args.freq, periods=160)
     
     # Visualize the raw data
     visualize_data(df, args.freq, OUTPUTS_DIR)
