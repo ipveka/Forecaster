@@ -115,20 +115,20 @@ class CreateBaselines:
         # Iterate over each signal column to calculate the moving average baseline
         for signal_col in signal_cols:
             # Calculate the rolling mean (moving average) for each group and signal column
-            train_df[f'feature_baseline_{signal_col}'] = train_df.groupby(group_cols)[signal_col].transform(
+            train_df[f'feature_baseline_{signal_col}_ma_{bs_window_size}'] = train_df.groupby(group_cols)[signal_col].transform(
                 lambda x: x.rolling(bs_window_size, min_periods=1).mean())
 
             # Extract the last moving average value from the training data for each group to apply to the test set
-            last_ma_values = train_df.groupby(group_cols)[f'feature_baseline_{signal_col}'].last().reset_index()
+            last_ma_values = train_df.groupby(group_cols)[f'feature_baseline_{signal_col}_ma_{bs_window_size}'].last().reset_index()
 
-            # Rename the column to reflect that this is the final baseline for the signal
-            last_ma_values = last_ma_values.rename(columns={f'feature_baseline_{signal_col}': f'baseline_{signal_col}'})
+            # Rename the column to reflect that this is the final baseline for the signal with MA method and window size
+            last_ma_values = last_ma_values.rename(columns={f'feature_baseline_{signal_col}_ma_{bs_window_size}': f'baseline_{signal_col}_ma_{bs_window_size}'})
 
             # Merge the calculated baseline with the test set
             test_df = test_df.merge(last_ma_values, on=group_cols, how='left')
 
             # Set the feature baseline for the test set to the calculated baseline values
-            test_df[f'feature_baseline_{signal_col}'] = test_df[f'baseline_{signal_col}']
+            test_df[f'feature_baseline_{signal_col}_ma_{bs_window_size}'] = test_df[f'baseline_{signal_col}_ma_{bs_window_size}']
 
         # Concatenate the modified train and test sets back together
         final_df = pd.concat([train_df, test_df], ignore_index=True)

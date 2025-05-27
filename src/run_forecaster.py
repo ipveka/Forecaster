@@ -118,7 +118,8 @@ def main():
         training_group='training_group',
         tune_hyperparameters=args.tune,
         use_feature_selection=False,
-        n_best_features=15,
+        use_lags=True,
+        n_best_features=20,
         use_guardrail=False,
         use_parallel=False
     )
@@ -128,6 +129,13 @@ def main():
     
     # Save the results
     save_results(result_df, runner.metrics, args.freq, OUTPUTS_DIR)
+    
+    # Plot and save feature importance if available
+    if hasattr(runner, 'forecaster') and runner.forecaster is not None:
+        feature_importance_path = os.path.join(OUTPUTS_DIR, 'feature_importance.png')
+        print(f"\nGenerating feature importance plot...")
+        runner.plot_feature_importance(top_n=15, save_path=feature_importance_path)
+        print(f"Feature importance plot saved to: {feature_importance_path}")
     
     # Calculate execution time
     execution_time = time.time() - start_time

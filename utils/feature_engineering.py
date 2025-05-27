@@ -93,7 +93,7 @@ class FeatureEngineering:
         print("Encoded categorical features.")
 
         # Add date features
-        df = self.create_date_features(df, date_col, freq)
+        df = self.create_date_features(df, date_col, extended_dates=False)
         print("Added date features.")
 
         # Add periods feature
@@ -302,7 +302,7 @@ class FeatureEngineering:
         return df_copy
 
     # Create date features
-    def create_date_features(self, df, date_col, freq):
+    def create_date_features(self, df, date_col, extended_dates=False):
         """
         Create date-related features from the date column, including weeks and months until the next end of quarter and end of year.
         All generated features are prefixed with 'feature_' for consistency.
@@ -310,7 +310,7 @@ class FeatureEngineering:
         Parameters:
             df (pd.DataFrame): Input DataFrame with a date column.
             date_col (str): The name of the date column from which to extract the features.
-            freq (str): Frequency type
+            extended_dates (bool): Whether to include extended features
 
         Returns:
             pd.DataFrame: DataFrame with new feature columns, all prefixed with 'feature_'.
@@ -321,7 +321,7 @@ class FeatureEngineering:
         # Ensure the date column is in datetime format
         df[date_col] = pd.to_datetime(df[date_col])
 
-        # Create basic date-related features using vectorized operations
+        # Create basic date-related features
         df['feature_year'] = df[date_col].dt.year
         df['feature_quarter'] = df[date_col].dt.quarter
         df['feature_month'] = df[date_col].dt.month
@@ -329,38 +329,53 @@ class FeatureEngineering:
         # Lower frequency features
         df['feature_week'] = df[date_col].dt.isocalendar().week.astype(int)
         df['feature_day'] = df[date_col].dt.day
+        
+        # Whether to include extended features
+        if extended_dates:
+            # Calculate end of month dates
+            df['next_month_end'] = df[date_col] + pd.offsets.MonthEnd(0)
+            mask = df[date_col].dt.is_month_end
+            df.loc[mask, 'next_month_end'] = df.loc[mask, date_col] + pd.offsets.MonthEnd(1)
+        
+            # Calculate end of week dates (assuming week ends on Sunday)
+            df['next_week_end'] = df[date_col] + pd.offsets.Week(weekday=6)
+            mask = df[date_col].dt.dayofweek == 6  # Sunday
+            df.loc[mask, 'next_week_end'] = df.loc[mask, date_col] + pd.offsets.Week(weekday=6, n=1)
+        
+            # Calculate next quarter end dates using pandas built-in function
+            df['next_quarter_end'] = df[date_col] + pd.offsets.QuarterEnd(0)
+            mask = df[date_col].dt.is_quarter_end
+            df.loc[mask, 'next_quarter_end'] = df.loc[mask, date_col] + pd.offsets.QuarterEnd(1)
 
-        # Calculate next quarter end dates using pandas built-in function
-        df['next_quarter_end'] = df[date_col] + pd.offsets.QuarterEnd(0)
-        mask = df[date_col].dt.is_quarter_end
-        df.loc[mask, 'next_quarter_end'] = df.loc[mask, date_col] + pd.offsets.QuarterEnd(1)
+            # Calculate next year end dates
+            df['next_year_end'] = df[date_col].dt.year.astype(str) + '-12-31'
+            df['next_year_end'] = pd.to_datetime(df['next_year_end'])
+            mask = df[date_col].dt.is_year_end
+            df.loc[mask, 'next_year_end'] += pd.DateOffset(years=1)
 
-        # Calculate next year end dates
-        df['next_year_end'] = df[date_col].dt.year.astype(str) + '-12-31'
-        df['next_year_end'] = pd.to_datetime(df['next_year_end'])
-        mask = df[date_col].dt.is_year_end
-        df.loc[mask, 'next_year_end'] += pd.DateOffset(years=1)
+            # Calculate days until end of month/week/quarter/year as integers
+            df['feature_days_until_end_of_month'] = (df['next_month_end'] - df[date_col]).dt.days.astype(int)
+            df['feature_days_until_end_of_week'] = (df['next_week_end'] - df[date_col]).dt.days.astype(int)
+            df['feature_days_until_end_of_quarter'] = (df['next_quarter_end'] - df[date_col]).dt.days.astype(int)
+            df['feature_days_until_end_of_year'] = (df['next_year_end'] - df[date_col]).dt.days.astype(int)
+            
+            # Calculate weeks until end of month/quarter/year as floats
+            df['feature_weeks_until_end_of_month'] = (df['feature_days_until_end_of_month'] / 7).astype(float)
+            df['feature_weeks_until_end_of_quarter'] = (df['feature_days_until_end_of_quarter'] / 7).astype(float)
+            df['feature_weeks_until_end_of_year'] = (df['feature_days_until_end_of_year'] / 7).astype(float)
 
-        # Calculate weeks until next end of quarter/year as floats
-        df['feature_weeks_until_next_end_of_quarter'] = (
-            (df['next_quarter_end'] - df[date_col]).dt.days / 7
-        ).astype(float)
-        df['feature_weeks_until_end_of_year'] = (
-            (df['next_year_end'] - df[date_col]).dt.days / 7
-        ).astype(float)
+            # Calculate months until end of quarter/year as floats
+            df['feature_months_until_end_of_quarter'] = (
+                ((df['next_quarter_end'].dt.year - df[date_col].dt.year) * 12 +
+                df['next_quarter_end'].dt.month - df[date_col].dt.month)
+            ).astype(float)
+            df['feature_months_until_end_of_year'] = (
+                ((df['next_year_end'].dt.year - df[date_col].dt.year) * 12 +
+                df['next_year_end'].dt.month - df[date_col].dt.month)
+            ).astype(float)
 
-        # Calculate months until next end of quarter/year as floats
-        df['feature_months_until_next_end_of_quarter'] = (
-            ((df['next_quarter_end'].dt.year - df[date_col].dt.year) * 12 +
-            df['next_quarter_end'].dt.month - df[date_col].dt.month)
-        ).astype(float)
-        df['feature_months_until_end_of_year'] = (
-            ((df['next_year_end'].dt.year - df[date_col].dt.year) * 12 +
-            df['next_year_end'].dt.month - df[date_col].dt.month)
-        ).astype(float)
-
-        # Drop intermediate columns
-        df = df.drop(['next_quarter_end', 'next_year_end'], axis=1)
+            # Drop intermediate columns
+            df = df.drop(['next_month_end', 'next_week_end', 'next_quarter_end', 'next_year_end'], axis=1)
 
         return df
 
