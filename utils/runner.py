@@ -61,6 +61,8 @@ class Runner:
         self.verbose = verbose
         self.grouped_metrics = None
         self.execution_time = None
+        self.feature_importances = None
+        self.forecaster = None
         
         logging.info("Runner initialized successfully")
         if self.verbose:
@@ -99,7 +101,7 @@ class Runner:
                     search_method='halving',     # Search method for hyperparameter tuning
                     scoring='neg_mean_squared_log_error',  # Scoring metric for hyperparameter tuning
                     n_best_features=15,         # Number of best features to select
-                    use_feature_selection=True,  # Whether to use feature selection
+                    use_lags=True,              # Whether to include lag features
                     remove_outliers=False,       # Whether to remove outliers in forecasting
                     outlier_column=None,         # Column from which to remove outliers
                     lower_quantile=0.025,        # Lower quantile for outlier removal
@@ -203,10 +205,9 @@ class Runner:
             n_clusters=n_clusters
         )
         
-        # Step 3: Create Baselines
+        # Log completion of feature engineering step
         step_time = time.time() - step_start
         print(f"\nFeature engineering completed in {step_time:.2f} seconds")
-        
         print("\n" + "-" * 80)
         print("[Step 3/5] CREATING BASELINES")
         print("-" * 80)
@@ -214,232 +215,142 @@ class Runner:
         logging.info(f"Starting baseline creation with types: {baseline_types}")
         cb = CreateBaselines()
         
-        # Get the list of feature columns
-        feature_cols = [col for col in feature_df.columns if col.startswith('feature_')]
+        # Log baseline parameters
+        print(f"Baseline configuration:")
+        print(f"• Baseline types: {baseline_types}")
+        print(f"• Window size: {bs_window_size}")
         
+        # Call the baseline creation wrapper function with all relevant parameters
         baseline_df = cb.run_baselines(
             df=feature_df,
             group_cols=group_cols,
             date_col=date_col,
-            signal_cols=signal_cols,
+            signal_cols=[target],
             baseline_types=baseline_types,
-            bs_window_size=bs_window_size,
-            feature_cols=feature_cols
+            bs_window_size=bs_window_size
         )
         
-        # Step 4: Run Forecasting
+        # Log completion of baseline creation step
         step_time = time.time() - step_start
         print(f"\nBaseline creation completed in {step_time:.2f} seconds")
-        
         print("\n" + "-" * 80)
         print("[Step 4/5] RUNNING FORECASTING")
         print("-" * 80)
         step_start = time.time()
         logging.info(f"Starting forecasting with model: {model}")
-        
-        # Determine baseline column for guardrail
-        baseline_col = None
-        if use_guardrail:
-            if 'ML' in baseline_types:
-                baseline_col = f'baseline_{target}_lgbm'
-            elif 'LR' in baseline_types:
-                baseline_col = f'baseline_{target}_lr'
-            else:
-                baseline_col = f'baseline_{target}_ma_{window_size}'
-        
-        # Create necessary columns for the forecaster
-        print("\nPreparing dataframe for forecasting...")
-        
-        # Handle training_group parameter
-        if training_group is not None and training_group in baseline_df.columns:
-            print(f"Using existing column '{training_group}' as training group")
-            # Rename the column to training_group if it's not already called that
-            if training_group != 'training_group':
-                baseline_df['training_group'] = baseline_df[training_group].astype(int)
-                print(f"Copied '{training_group}' column to 'training_group' and cast to integer")
-        else:
-            # Default baseline
-            print("Creating default training_group with value 1")
-            baseline_df['training_group'] = 1
+        forecaster = Forecaster(baseline_df)
         
         # Log forecasting parameters
+        print("\nPreparing dataframe for forecasting...")
+        
+        # If training_group is not specified, create a default one
+        if training_group is None or training_group not in baseline_df.columns:
+            print(f"Creating default training_group with value 1")
+            baseline_df['training_group'] = 1
+            training_group = 'training_group'
+            
+        # Ensure the forecaster has the updated dataframe with the training_group column
+        forecaster = Forecaster(baseline_df)
+        
+        # Set baseline column if not specified
+        if baseline_col is None:
+            baseline_col = f"baseline_{target}_ma_{bs_window_size}"
+        
+        # Log forecasting configuration
         print(f"Forecasting configuration:")
         print(f"• Model: {model}")
         print(f"• Target column: '{target}'")
         print(f"• Training group column: '{training_group}'")
         print(f"• Tune hyperparameters: {tune_hyperparameters}")
-        if tune_hyperparameters:
-            print(f"• Search method: {search_method}")
-            print(f"• Scoring metric: {scoring}")
-        print(f"• Use feature selection: {use_feature_selection}")
-        if use_feature_selection:
-            print(f"• Number of best features: {n_best_features}")
+        print(f"• Selecting N best features: {n_best_features}")
+        print(f"• Use lag features: {use_lags}")
         print(f"• Use guardrail: {use_guardrail}")
-        if use_guardrail:
-            print(f"• Guardrail limit: {guardrail_limit}")
-            print(f"• Baseline column: '{baseline_col}'")
         print(f"• Use parallel processing: {use_parallel}")
         print(f"• Remove outliers: {remove_outliers}")
-
-        # Start forecaster
-        forecaster = Forecaster(baseline_df)
         
-        try:
-            # Get the list of feature columns
-            feature_cols = [col for col in baseline_df.columns if 'feature_' in col]
+        # Automatically find all feature columns containing 'feature' in their names
+        feature_cols = [col for col in baseline_df.columns if "feature" in col]
+        
+        # Filter out lag features if use_lags is False
+        if not use_lags:
+            original_count = len(feature_cols)
+            feature_cols = [col for col in feature_cols if "lag" not in col]
+            filtered_count = original_count - len(feature_cols)
+            print(f"Found {original_count} feature columns, filtered out {filtered_count} lag features")
+        else:
             print(f"Found {len(feature_cols)} feature columns for forecasting")
-            
-            # Run the backtesting with all parameters
-            forecast_df = forecaster.run_backtesting(
-                group_cols=group_cols,
-                features=feature_cols,
-                training_group='training_group',
-                target_col=target,
-                model=model,
-                tune_hyperparameters=tune_hyperparameters,
-                search_method=search_method,
-                scoring=scoring,
-                n_best_features=n_best_features if use_feature_selection else None,
-                best_features=use_feature_selection,
-                remove_outliers=remove_outliers,
-                outlier_column=outlier_column if remove_outliers else None,
-                lower_quantile=lower_quantile,
-                upper_quantile=upper_quantile,
-                ts_decomposition=ts_decomposition,
-                baseline_col=baseline_col,
-                use_guardrail=use_guardrail,
-                guardrail_limit=guardrail_limit,
-                use_weights=use_weights,
-                use_parallel=use_parallel,
-                num_cpus=num_cpus
-            )
-        except Exception as e:
-            # Show error
-            print(f"Error in forecasting step: {str(e)}")
-            raise
         
-        # Store the final DataFrame
-        self.final_df = forecast_df
+        # Print all features that will be used
+        print("\nFeatures to be used in forecasting:")
+        for i, feature in enumerate(feature_cols, 1):
+            print(f"{i}. {feature}")
+        print()
         
-        # Step 5: Evaluate Results
+        # Call the forecasting function with all relevant parameters
+        forecast_df = forecaster.run_backtesting(
+            group_cols=group_cols,
+            features=feature_cols,
+            params=None,
+            training_group=training_group,
+            target_col=target,
+            model=model,
+            tune_hyperparameters=tune_hyperparameters,
+            search_method=search_method,
+            param_distributions=None,
+            scoring=scoring,
+            n_iter=50,
+            best_features=None, 
+            n_best_features=n_best_features,
+            remove_outliers=False,
+            outlier_column=None,
+            lower_quantile=0.025,
+            upper_quantile=0.975,
+            ts_decomposition=False,
+            baseline_col=baseline_col,
+            use_guardrail=use_guardrail,
+            guardrail_limit=guardrail_limit,
+            use_weights=use_weights,
+            use_parallel=use_parallel,
+            num_cpus=num_cpus
+        )
+        
+        # Log completion of forecasting step
         step_time = time.time() - step_start
         print(f"\nForecasting completed in {step_time:.2f} seconds")
-        
         print("\n" + "-" * 80)
         print("[Step 5/5] EVALUATING RESULTS")
         print("-" * 80)
         step_start = time.time()
         logging.info("Starting evaluation step")
         
-        # Find the prediction column(s)
-        preds_cols = [col for col in forecast_df.columns if col.startswith('prediction')]
-        if len(preds_cols) == 0:
-            print("Warning: No prediction columns found. Looking for alternative columns.")
-            preds_cols = [col for col in forecast_df.columns if 'pred' in col.lower()]
-        
-        # Find the baseline column(s)
-        if baseline_col is None:
-            baseline_col = f'baseline_{target}'
-            if baseline_col not in forecast_df.columns:
-                # Look for any baseline column
-                baseline_cols = [col for col in forecast_df.columns if 'baseline' in col.lower()]
-                if len(baseline_cols) > 0:
-                    baseline_col = baseline_cols[0]
-                    print(f"Using '{baseline_col}' as baseline column")
-                else:
-                    print("Warning: No baseline column found. Evaluation might be limited.")
-                    baseline_col = None
-        
         # Log evaluation parameters
         print(f"Evaluation configuration:")
         print(f"• Target column: '{target}'")
         print(f"• Baseline column: '{baseline_col}'")
-        print(f"• Prediction columns: {preds_cols}")
-        if eval_group_col:
-            print(f"• Group column for evaluation: '{eval_group_col}'")
-            if eval_group_filter:
-                print(f"• Group filter: {eval_group_filter}")
+        print(f"• Prediction columns: ['prediction']")
         
-        # Create the evaluator only if we have the necessary columns
-        if baseline_col and len(preds_cols) > 0:
-            try:
-                evaluator = Evaluator(
-                    df=forecast_df,
-                    actuals_col=target,
-                    baseline_col=baseline_col,
-                    preds_cols=preds_cols
-                )
-                
-                # Calculate metrics
-                self.metrics = evaluator.evaluate()
-                print("\nMetric summary:")
-                for model, metrics in self.metrics.items():
-                    print(f"\n{model}:")
-                    for metric_name, value in metrics.items():
-                        print(f"• {metric_name}: {value:.4f}")
-                
-                # Create metric table
-                self.metric_table = evaluator.create_metric_table()
-                
-                # Calculate grouped metrics if requested
-                if eval_group_col and eval_group_col in forecast_df.columns:
-                    print(f"\nCalculating metrics grouped by '{eval_group_col}'")
-                    grouped_rmse = evaluator.calculate_grouped_metric(
-                        metric_name='RMSE',
-                        group_col=eval_group_col,
-                        group_filter=eval_group_filter
-                    )
-                    
-                    # Store grouped metrics
-                    self.grouped_metrics = {
-                        'RMSE': grouped_rmse
-                    }
-                    
-                    # Display grouped metrics
-                    print("\nRMSE by group:")
-                    print(grouped_rmse)
-            except Exception as e:
-                print(f"Error in evaluation step: {str(e)}")
-                logging.warning(f"Evaluation failed: {str(e)}")
-        else:
-            print("Cannot perform evaluation: missing necessary columns (baseline or predictions)")
-            self.metrics = None
-            self.metric_table = None
+        # Store the final dataframe
+        self.final_df = forecast_df
+        self.execution_time = time.time() - start_time
         
-        # For test purposes, ensure we have a sample column to filter test data
-        if 'sample' not in forecast_df.columns:
-            print("Adding sample column for evaluation")
-            forecast_df['sample'] = 'test'  # Mark all data as test for simplified testing
-        
-        # Ensure we have test data
-        test_data = forecast_df[forecast_df['sample'] == 'test']
-        if len(test_data) == 0:
-            print("No test data found, creating mock test data for evaluation")
-            # If no test data is available, mark the last 20% of rows as test
-            total_rows = len(forecast_df)
-            test_rows = int(total_rows * 0.2)
-            forecast_df.loc[forecast_df.index[-test_rows:], 'sample'] = 'test'
-        
-        # Determine the prediction column name based on the model
-        pred_cols = ['prediction']
-        baseline_column = baseline_col if baseline_col else f'baseline_{signal_cols[0]}'
-        
-        # Make sure the prediction column exists
-        if 'prediction' not in forecast_df.columns:
-            print("Adding mock prediction column for evaluation")
-            forecast_df['prediction'] = forecast_df[baseline_column]
+        # Store the forecaster instance for later use (e.g., feature importance)
+        self.forecaster = forecaster
         
         # Create an evaluator
         evaluator = Evaluator(
             df=forecast_df,
-            actuals_col=signal_cols[0],
-            baseline_col=baseline_column,
-            preds_cols=pred_cols
+            actuals_col=target,
+            baseline_col=baseline_col,
+            preds_cols=['prediction']
         )
         
         # Calculate metrics
         self.metrics = evaluator.evaluate()
         self.metric_table = evaluator.create_metric_table()
+        
+        # Print metric summary
+        print("\nMetric summary:\n")
+        print(self.metric_table)
         
         # If a grouping column is specified, calculate grouped metrics
         if eval_group_col and eval_group_col in forecast_df.columns:
@@ -448,31 +359,53 @@ class Runner:
                 group_col=eval_group_col,
                 group_filter=eval_group_filter
             )
+            
+            # Print grouped metrics
+            print(f"\nRMSE by {eval_group_col}:")
+            print(self.grouped_metrics)
         
-        # Step time
-        step_time = time.time() - step_start
-        total_time = time.time() - start_time
-        self.execution_time = total_time
+        # Store feature importances if available
+        if hasattr(forecaster, 'feature_importances') and forecaster.feature_importances:
+            self.feature_importances = forecaster.get_feature_importance()
+            print("\nFeature importance information is available. Use plot_feature_importance() to visualize.")
         
+        # Final message and return
         print("\n" + "=" * 80)
         print("FORECASTER PIPELINE COMPLETED SUCCESSFULLY")
         print("=" * 80)
-        print(f"\nTotal execution time: {total_time:.2f} seconds")
+        print(f"\nTotal execution time: {self.execution_time:.2f} seconds")
         print(f"Data shape: {forecast_df.shape[0]} rows × {forecast_df.shape[1]} columns")
         
-        print("\nMetrics summary:")
-        print(self.metric_table)
-        
-        if self.grouped_metrics is not None:
-            print("\nGrouped metrics:")
-            print(self.grouped_metrics)
+        if self.metric_table is not None:
+            print(f"\nMetrics summary:")
+            print(self.metric_table)
             
-        logging.info(f"Pipeline completed successfully in {total_time:.2f} seconds")
+        logging.info(f"Pipeline completed successfully in {self.execution_time:.2f} seconds")
         
         # Free memory
         gc.collect()
         
         return forecast_df
+    
+    def plot_feature_importance(self, top_n=15):
+        """
+        Plot the feature importance from the forecaster.
+        
+        Parameters:
+        -----------
+        top_n : int, default=15
+            Number of top features to display
+            
+        Returns:
+        --------
+        None
+        """
+        if self.forecaster is None:
+            print("No forecaster available. Run the pipeline first.")
+            return
+        
+        # Use the forecaster's plot_feature_importance method directly
+        self.forecaster.plot_feature_importance(top_n=top_n)
     
     def get_metrics(self):
         """
@@ -483,9 +416,6 @@ class Runner:
         dict
             Dictionary containing metrics for baseline and predictions.
         """
-        if self.metrics is None:
-            logging.warning("Metrics not available - pipeline may not have run successfully")
-            print("Metrics not available. Please run the pipeline first.")
         return self.metrics
     
     def get_metric_table(self):
@@ -497,9 +427,6 @@ class Runner:
         pd.DataFrame
             DataFrame containing the rounded metrics for baseline and predictions.
         """
-        if self.metric_table is None:
-            logging.warning("Metric table not available - pipeline may not have run successfully")
-            print("Metric table not available. Please run the pipeline first.")
         return self.metric_table
     
     def get_final_df(self):
@@ -511,11 +438,8 @@ class Runner:
         pd.DataFrame
             The final DataFrame.
         """
-        if self.final_df is None:
-            logging.warning("Final DataFrame not available - pipeline may not have run successfully")
-            print("Final DataFrame not available. Please run the pipeline first.")
         return self.final_df
-        
+    
     def get_execution_time(self):
         """
         Get the total execution time of the pipeline in seconds.
@@ -526,7 +450,7 @@ class Runner:
             Total execution time in seconds, or None if pipeline hasn't been run.
         """
         return self.execution_time
-        
+    
     def get_grouped_metrics(self):
         """
         Get the grouped metrics if available.
@@ -538,3 +462,17 @@ class Runner:
             or None if grouped metrics were not calculated.
         """
         return self.grouped_metrics
+    
+    def get_feature_importances(self):
+        """
+        Get the feature importances if available.
+        
+        Returns:
+        --------
+        dict or None
+            Dictionary containing feature importances for each cutoff and training group,
+            or None if feature importances were not calculated.
+        """
+        if self.forecaster:
+            return self.forecaster.get_feature_importance()
+        return None

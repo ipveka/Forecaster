@@ -16,15 +16,17 @@ import logging
 plt.style.use('seaborn-v0_8-whitegrid')
 sns.set_context("talk")
 
-def generate_sample_data(freq='W', periods=104):
+
+def generate_sample_data(freq='W', periods=156):
     """
     Generate sample time series data with the specified frequency.
+    Data will be generated backwards from yesterday (or last week/month).
     
     Parameters:
     -----------
     freq : str, default='W'
         Frequency of the data ('D' for daily, 'W' for weekly, 'M' for monthly)
-    periods : int, default=104
+    periods : int, default=156
         Number of periods to generate
         
     Returns:
@@ -34,16 +36,45 @@ def generate_sample_data(freq='W', periods=104):
     """
     logging.info(f"Generating sample {freq} data with {periods} periods")
     
-    # Set start date based on frequency
+    # Get current date
+    today = datetime.now()
+    
+    # Set end date as yesterday, last week, or last month based on frequency
     if freq == 'D':
-        start_date = datetime(2022, 1, 1)
+        # Yesterday
+        end_date = today - timedelta(days=1)
     elif freq == 'W':
-        start_date = datetime(2022, 1, 3)  # Sunday
+        # Last week (previous Sunday)
+        days_since_sunday = today.weekday() + 1
+        end_date = today - timedelta(days=days_since_sunday)
     else:  # Monthly
-        start_date = datetime(2022, 1, 31)
+        # Last month (end of previous month)
+        if today.month == 1:
+            end_date = datetime(today.year - 1, 12, 31)
+        else:
+            # Last day of previous month
+            last_day = pd.Timestamp(today.year, today.month, 1) - timedelta(days=1)
+            end_date = datetime(last_day.year, last_day.month, last_day.day)
+    
+    # Calculate start date by going back 'periods' from end date
+    if freq == 'D':
+        start_date = end_date - timedelta(days=periods-1)
+    elif freq == 'W':
+        start_date = end_date - timedelta(weeks=periods-1)
+    else:  # Monthly
+        # Go back periods-1 months from end_date
+        month = end_date.month - ((periods-1) % 12)
+        year = end_date.year - ((periods-1) // 12)
+        if month <= 0:
+            month += 12
+            year -= 1
+        start_date = datetime(year, month, 1)
     
     # Create date range
     dates = pd.date_range(start=start_date, periods=periods, freq=freq)
+    # Format dates as YYYY-MM-DD without time components
+    dates = [pd.Timestamp(date).strftime('%Y-%m-%d') for date in dates]
+    dates = pd.to_datetime(dates)
     
     # Create product IDs and store IDs
     product_ids = ['P001', 'P002', 'P003', 'P004', 'P005']
@@ -62,9 +93,9 @@ def generate_sample_data(freq='W', periods=104):
                 
                 # Add product-specific trend
                 if product_id == 'P001':
-                    trend = 0.1 * (date - start_date).days / 30  # Increasing trend
+                    trend = 0.1 * (date - start_date).days / 30 
                 elif product_id == 'P002':
-                    trend = -0.05 * (date - start_date).days / 30  # Decreasing trend
+                    trend = -0.05 * (date - start_date).days / 30 
                 else:
                     trend = 0  # Flat trend
                 
@@ -95,8 +126,8 @@ def generate_sample_data(freq='W', periods=104):
                     'date': date,
                     'product': product_id,
                     'store': store_id,
-                    'sales': max(0, sales),  # Ensure non-negative
-                    'inventory': max(0, inventory)  # Ensure non-negative
+                    'sales': max(0, sales),
+                    'inventory': max(0, inventory)
                 }
                 records.append(record)
     
@@ -343,7 +374,7 @@ def get_frequency_params(freq):
             'fe_window_size': (14, 28),
             'bs_window_size': 14,
             'lags': (7, 14, 28, 35),
-            'periods': 365
+            'periods': 1095 
         }
     elif freq == 'W':
         # Weekly
@@ -353,7 +384,7 @@ def get_frequency_params(freq):
             'fe_window_size': (4, 13),
             'bs_window_size': 13,
             'lags': (13, 26, 39, 52),
-            'periods': 52
+            'periods': 156
         }
     else:  
         # Monthly
@@ -363,5 +394,5 @@ def get_frequency_params(freq):
             'fe_window_size': (2, 6),
             'bs_window_size': 4,
             'lags': (4, 8, 12),
-            'periods': 12
+            'periods': 36
         }

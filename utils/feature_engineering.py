@@ -12,10 +12,13 @@ import os
 from itertools import product
 
 # Plots
+import pandas as pd
+import numpy as np
 import matplotlib.pyplot as plt
-
-# ML
-from sklearn.preprocessing import LabelEncoder
+from sklearn.preprocessing import OrdinalEncoder, OneHotEncoder, LabelEncoder
+from sklearn.cluster import KMeans
+from statsmodels.tsa.seasonal import seasonal_decompose
+import logging
 from sklearn.linear_model import LinearRegression
 from lightgbm import LGBMRegressor
 
@@ -93,19 +96,26 @@ class FeatureEngineering:
         print("Encoded categorical features.")
 
         # Add date features
-        df = self.create_date_features(df, date_col, freq)
+        df = self.create_date_features(df, date_col, extended_dates=False)
         print("Added date features.")
 
         # Add periods feature
         df = self.create_periods_feature(df, group_cols, date_col, target)
         print("Added periods feature.")
 
-        # Find numeric columns
+        # Find numeric columns, excluding cyclical features
         signal_cols = [
             col for col in df.select_dtypes(include=['float64']).columns
-            if "feature_periods" not in col and "weeks_until" not in col and "months_until" not in col
+            if ("feature_periods" not in col and 
+                "weeks_until" not in col and 
+                "months_until" not in col and
+                "sin_" not in col and 
+                "cos_" not in col and
+                "seasonal_" not in col and
+                "trend_" not in col)
         ]
-        print(f"Identified signal columns: {signal_cols}")
+        print(f"Identified signal columns for MA/lag features: {len(signal_cols)}")
+        print(f"Excluded cyclical features from MA/lag calculations")
 
         # Add MA features
         df = self.create_ma_features(df, group_cols, signal_cols, fe_window_size)
@@ -302,7 +312,7 @@ class FeatureEngineering:
         return df_copy
 
     # Create date features
-    def create_date_features(self, df, date_col, freq):
+    def create_date_features(self, df, date_col, extended_dates=False):
         """
         Create date-related features from the date column, including weeks and months until the next end of quarter and end of year.
         All generated features are prefixed with 'feature_' for consistency.
@@ -310,7 +320,7 @@ class FeatureEngineering:
         Parameters:
             df (pd.DataFrame): Input DataFrame with a date column.
             date_col (str): The name of the date column from which to extract the features.
-            freq (str): Frequency type
+            extended_dates (bool): Whether to include extended features
 
         Returns:
             pd.DataFrame: DataFrame with new feature columns, all prefixed with 'feature_'.
@@ -321,7 +331,7 @@ class FeatureEngineering:
         # Ensure the date column is in datetime format
         df[date_col] = pd.to_datetime(df[date_col])
 
-        # Create basic date-related features using vectorized operations
+        # Create basic date-related features
         df['feature_year'] = df[date_col].dt.year
         df['feature_quarter'] = df[date_col].dt.quarter
         df['feature_month'] = df[date_col].dt.month
@@ -329,41 +339,162 @@ class FeatureEngineering:
         # Lower frequency features
         df['feature_week'] = df[date_col].dt.isocalendar().week.astype(int)
         df['feature_day'] = df[date_col].dt.day
+        df['feature_dayofweek'] = df[date_col].dt.dayofweek
+        
+        # Add sine and cosine features for cyclical patterns
+        day_of_year = df[date_col].dt.dayofyear
+        days_in_year = 365.25 
+        
+        # Yearly seasonality - multiple harmonics (Fourier terms)
+        for k in range(1, 4):  # 3 harmonics for yearly pattern
+            df[f'feature_sin_yearly_{k}'] = np.sin(2 * np.pi * k * day_of_year / days_in_year)
+            df[f'feature_cos_yearly_{k}'] = np.cos(2 * np.pi * k * day_of_year / days_in_year)
+        
+        # Quarterly seasonality
+        days_in_quarter = 365.25 / 4
+        day_of_quarter = day_of_year - (df['feature_quarter'] - 1) * days_in_quarter
+        for k in range(1, 3):  # 2 harmonics for quarterly pattern
+            df[f'feature_sin_quarterly_{k}'] = np.sin(2 * np.pi * k * day_of_quarter / days_in_quarter)
+            df[f'feature_cos_quarterly_{k}'] = np.cos(2 * np.pi * k * day_of_quarter / days_in_quarter)
+        
+        # Monthly seasonality
+        day_of_month = df[date_col].dt.day
+        days_in_month = df[date_col].dt.days_in_month
+        for k in range(1, 3):  # 2 harmonics for monthly pattern
+            df[f'feature_sin_monthly_{k}'] = np.sin(2 * np.pi * k * day_of_month / days_in_month)
+            df[f'feature_cos_monthly_{k}'] = np.cos(2 * np.pi * k * day_of_month / days_in_month)
+        
+        # Weekly seasonality
+        day_of_week = df[date_col].dt.dayofweek
+        for k in range(1, 4):  # 3 harmonics for weekly pattern
+            df[f'feature_sin_weekly_{k}'] = np.sin(2 * np.pi * k * day_of_week / 7)
+            df[f'feature_cos_weekly_{k}'] = np.cos(2 * np.pi * k * day_of_week / 7)
+        
+        # Whether to include extended features
+        if extended_dates:
+            # Calculate end of month dates
+            df['next_month_end'] = df[date_col] + pd.offsets.MonthEnd(0)
+            mask = df[date_col].dt.is_month_end
+            df.loc[mask, 'next_month_end'] = df.loc[mask, date_col] + pd.offsets.MonthEnd(1)
+        
+            # Calculate end of week dates (assuming week ends on Sunday)
+            df['next_week_end'] = df[date_col] + pd.offsets.Week(weekday=6)
+            mask = df[date_col].dt.dayofweek == 6  # Sunday
+            df.loc[mask, 'next_week_end'] = df.loc[mask, date_col] + pd.offsets.Week(weekday=6, n=1)
+        
+            # Calculate next quarter end dates using pandas built-in function
+            df['next_quarter_end'] = df[date_col] + pd.offsets.QuarterEnd(0)
+            mask = df[date_col].dt.is_quarter_end
+            df.loc[mask, 'next_quarter_end'] = df.loc[mask, date_col] + pd.offsets.QuarterEnd(1)
 
-        # Calculate next quarter end dates using pandas built-in function
-        df['next_quarter_end'] = df[date_col] + pd.offsets.QuarterEnd(0)
-        mask = df[date_col].dt.is_quarter_end
-        df.loc[mask, 'next_quarter_end'] = df.loc[mask, date_col] + pd.offsets.QuarterEnd(1)
+            # Calculate next year end dates
+            df['next_year_end'] = df[date_col].dt.year.astype(str) + '-12-31'
+            df['next_year_end'] = pd.to_datetime(df['next_year_end'])
+            mask = df[date_col].dt.is_year_end
+            df.loc[mask, 'next_year_end'] += pd.DateOffset(years=1)
 
-        # Calculate next year end dates
-        df['next_year_end'] = df[date_col].dt.year.astype(str) + '-12-31'
-        df['next_year_end'] = pd.to_datetime(df['next_year_end'])
-        mask = df[date_col].dt.is_year_end
-        df.loc[mask, 'next_year_end'] += pd.DateOffset(years=1)
+            # Calculate days until end of month/week/quarter/year as integers
+            df['feature_days_until_end_of_month'] = (df['next_month_end'] - df[date_col]).dt.days.astype(int)
+            df['feature_days_until_end_of_week'] = (df['next_week_end'] - df[date_col]).dt.days.astype(int)
+            df['feature_days_until_end_of_quarter'] = (df['next_quarter_end'] - df[date_col]).dt.days.astype(int)
+            df['feature_days_until_end_of_year'] = (df['next_year_end'] - df[date_col]).dt.days.astype(int)
+            
+            # Calculate weeks until end of month/quarter/year as floats
+            df['feature_weeks_until_end_of_month'] = (df['feature_days_until_end_of_month'] / 7).astype(float)
+            df['feature_weeks_until_end_of_quarter'] = (df['feature_days_until_end_of_quarter'] / 7).astype(float)
+            df['feature_weeks_until_end_of_year'] = (df['feature_days_until_end_of_year'] / 7).astype(float)
 
-        # Calculate weeks until next end of quarter/year as floats
-        df['feature_weeks_until_next_end_of_quarter'] = (
-            (df['next_quarter_end'] - df[date_col]).dt.days / 7
-        ).astype(float)
-        df['feature_weeks_until_end_of_year'] = (
-            (df['next_year_end'] - df[date_col]).dt.days / 7
-        ).astype(float)
+            # Calculate months until end of quarter/year as floats
+            df['feature_months_until_end_of_quarter'] = (
+                ((df['next_quarter_end'].dt.year - df[date_col].dt.year) * 12 +
+                df['next_quarter_end'].dt.month - df[date_col].dt.month)
+            ).astype(float)
+            df['feature_months_until_end_of_year'] = (
+                ((df['next_year_end'].dt.year - df[date_col].dt.year) * 12 +
+                df['next_year_end'].dt.month - df[date_col].dt.month)
+            ).astype(float)
 
-        # Calculate months until next end of quarter/year as floats
-        df['feature_months_until_next_end_of_quarter'] = (
-            ((df['next_quarter_end'].dt.year - df[date_col].dt.year) * 12 +
-            df['next_quarter_end'].dt.month - df[date_col].dt.month)
-        ).astype(float)
-        df['feature_months_until_end_of_year'] = (
-            ((df['next_year_end'].dt.year - df[date_col].dt.year) * 12 +
-            df['next_year_end'].dt.month - df[date_col].dt.month)
-        ).astype(float)
-
-        # Drop intermediate columns
-        df = df.drop(['next_quarter_end', 'next_year_end'], axis=1)
+            # Drop intermediate columns
+            df = df.drop(['next_month_end', 'next_week_end', 'next_quarter_end', 'next_year_end'], axis=1)
 
         return df
 
+    # Create time series decomposition features
+    def create_decomposition_features(self, df, date_col, group_cols, signal_cols, period=None):
+        """
+        Create time series decomposition features using seasonal_decompose.
+        Extracts trend and seasonality components as features.
+        
+        Parameters:
+            df (pd.DataFrame): Input DataFrame.
+            date_col (str): The name of the date column.
+            group_cols (list): Columns to group by.
+            signal_cols (list): Signal columns to decompose.
+            period (int, optional): Period for seasonal decomposition. If None, will try to infer.
+        
+        Returns:
+            pd.DataFrame: DataFrame with decomposition features added.
+        """
+        # Copy the input DataFrame
+        df = df.copy()
+        
+        # Ensure date column is in datetime format
+        df[date_col] = pd.to_datetime(df[date_col])
+        
+        # Sort by date
+        df = df.sort_values(date_col)
+        
+        # Infer period if not provided
+        if period is None:
+            # Try to infer from data frequency
+            # Daily -> 7, Weekly -> 52, Monthly -> 12
+            date_diff = df[date_col].diff().median().days
+            if date_diff == 1:  # Daily data
+                period = 7  # Weekly seasonality
+            elif date_diff == 7:  # Weekly data
+                period = 52  # Yearly seasonality
+            elif date_diff >= 28 and date_diff <= 31:  # Monthly data
+                period = 12  # Yearly seasonality
+            else:
+                period = 7  # Default
+        
+        # Process each group separately
+        for group_vals, group_df in df.groupby(group_cols):
+            # Convert group_vals to tuple if it's not already
+            if not isinstance(group_vals, tuple):
+                group_vals = (group_vals,)
+            
+            # Create mask for this group
+            mask = True
+            for col, val in zip(group_cols, group_vals):
+                mask = mask & (df[col] == val)
+            
+            # Process each signal column
+            for col in signal_cols:
+                # Get time series for this group and signal
+                ts = group_df[col]
+                
+                # Skip if not enough data points
+                if len(ts) < period * 2:
+                    continue
+                
+                try:
+                    # Decompose the time series
+                    decomposition = seasonal_decompose(ts, model='additive', period=period)
+                    
+                    # Add trend and seasonal components as features
+                    df.loc[mask, f'feature_trend_{col}'] = decomposition.trend
+                    df.loc[mask, f'feature_seasonal_{col}'] = decomposition.seasonal
+                    
+                    # Fill NaN values that occur at the beginning/end of trend
+                    df[f'feature_trend_{col}'] = df[f'feature_trend_{col}'].fillna(method='ffill').fillna(method='bfill')
+                    df[f'feature_seasonal_{col}'] = df[f'feature_seasonal_{col}'].fillna(method='ffill').fillna(method='bfill')
+                except Exception as e:
+                    print(f"Error decomposing {col} for group {group_vals}: {e}")
+                    continue
+        
+        return df
+    
     # Calculate MA features
     def create_ma_features(self, df, group_columns, signal_columns, fe_window_size):
         """
