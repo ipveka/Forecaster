@@ -148,7 +148,9 @@ The repository is organized into several folders for easy navigation:
   - **`runner`**: An end-to-end workflow notebook utilizing the `Runner` class to streamline the entire process, creating a complete forecasting pipeline.
 
 - **`src`**  
-  Contains the main executable scripts, including `run_forecaster.py` which demonstrates how to use the Runner class.
+  Contains the main executable scripts:
+  - **`run_forecaster.py`**: Demonstrates how to use the Runner class for end-to-end forecasting.
+  - **`generate_examples.py`**: Generates sample data with different frequencies (daily, weekly, monthly) and uploads it to either Supabase or a PostgreSQL database.
 
 - **`utils`**  
   The utility folder holding the main classes, auxiliary functions, and plotting tools for the project.
