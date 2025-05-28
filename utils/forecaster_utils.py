@@ -20,12 +20,13 @@ sns.set_context("talk")
 def generate_sample_data(freq='W', periods=156):
     """
     Generate sample time series data with the specified frequency.
+    Data will be generated backwards from yesterday (or last week/month).
     
     Parameters:
     -----------
     freq : str, default='W'
         Frequency of the data ('D' for daily, 'W' for weekly, 'M' for monthly)
-    periods : int, default=104
+    periods : int, default=156
         Number of periods to generate
         
     Returns:
@@ -35,16 +36,45 @@ def generate_sample_data(freq='W', periods=156):
     """
     logging.info(f"Generating sample {freq} data with {periods} periods")
     
-    # Set start date based on frequency (3 years back from 2022)
+    # Get current date
+    today = datetime.now()
+    
+    # Set end date as yesterday, last week, or last month based on frequency
     if freq == 'D':
-        start_date = datetime(2019, 1, 1)
+        # Yesterday
+        end_date = today - timedelta(days=1)
     elif freq == 'W':
-        start_date = datetime(2019, 1, 6)
+        # Last week (previous Sunday)
+        days_since_sunday = today.weekday() + 1
+        end_date = today - timedelta(days=days_since_sunday)
     else:  # Monthly
-        start_date = datetime(2019, 1, 31)
+        # Last month (end of previous month)
+        if today.month == 1:
+            end_date = datetime(today.year - 1, 12, 31)
+        else:
+            # Last day of previous month
+            last_day = pd.Timestamp(today.year, today.month, 1) - timedelta(days=1)
+            end_date = datetime(last_day.year, last_day.month, last_day.day)
+    
+    # Calculate start date by going back 'periods' from end date
+    if freq == 'D':
+        start_date = end_date - timedelta(days=periods-1)
+    elif freq == 'W':
+        start_date = end_date - timedelta(weeks=periods-1)
+    else:  # Monthly
+        # Go back periods-1 months from end_date
+        month = end_date.month - ((periods-1) % 12)
+        year = end_date.year - ((periods-1) // 12)
+        if month <= 0:
+            month += 12
+            year -= 1
+        start_date = datetime(year, month, 1)
     
     # Create date range
     dates = pd.date_range(start=start_date, periods=periods, freq=freq)
+    # Format dates as YYYY-MM-DD without time components
+    dates = [pd.Timestamp(date).strftime('%Y-%m-%d') for date in dates]
+    dates = pd.to_datetime(dates)
     
     # Create product IDs and store IDs
     product_ids = ['P001', 'P002', 'P003', 'P004', 'P005']
