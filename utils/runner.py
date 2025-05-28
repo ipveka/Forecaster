@@ -101,7 +101,6 @@ class Runner:
                     search_method='halving',     # Search method for hyperparameter tuning
                     scoring='neg_mean_squared_log_error',  # Scoring metric for hyperparameter tuning
                     n_best_features=15,         # Number of best features to select
-                    use_feature_selection=True,  # Whether to use feature selection
                     use_lags=True,              # Whether to include lag features
                     remove_outliers=False,       # Whether to remove outliers in forecasting
                     outlier_column=None,         # Column from which to remove outliers
@@ -263,7 +262,7 @@ class Runner:
         print(f"• Target column: '{target}'")
         print(f"• Training group column: '{training_group}'")
         print(f"• Tune hyperparameters: {tune_hyperparameters}")
-        print(f"• Use feature selection: {use_feature_selection}")
+        print(f"• Selecting N best features: {n_best_features}")
         print(f"• Use lag features: {use_lags}")
         print(f"• Use guardrail: {use_guardrail}")
         print(f"• Use parallel processing: {use_parallel}")
@@ -388,18 +387,14 @@ class Runner:
         
         return forecast_df
     
-    def plot_feature_importance(self, top_n=20, figsize=(12, 8), save_path=None):
+    def plot_feature_importance(self, top_n=15):
         """
         Plot the feature importance from the forecaster.
         
         Parameters:
         -----------
-        top_n : int, default=20
+        top_n : int, default=15
             Number of top features to display
-        figsize : tuple, default=(12, 8)
-            Figure size
-        save_path : str, default=None
-            Path to save the figure. If None, the figure is displayed but not saved.
             
         Returns:
         --------
@@ -409,58 +404,8 @@ class Runner:
             print("No forecaster available. Run the pipeline first.")
             return
         
-        if not hasattr(self.forecaster, 'feature_importances') or not self.forecaster.feature_importances:
-            print("No feature importance information available.")
-            return
-        
-        # Get feature importances
-        all_importances = []
-        all_feature_names = []
-        
-        # Collect all model feature importances and names
-        for (cutoff, group), model in self.forecaster.models.items():
-            if hasattr(model, 'feature_importances_'):
-                importances = model.feature_importances_
-                feature_names = model.feature_name_
-                
-                if len(importances) > 0:
-                    all_importances.append(importances)
-                    all_feature_names.append(feature_names)
-        
-        if not all_importances:
-            print("No feature importance data found in models.")
-            return
-            
-        # Use the feature names from the first model
-        feature_names = all_feature_names[0]
-        
-        # Average feature importances across all models
-        avg_importances = np.mean(all_importances, axis=0)
-        
-        # Create a dictionary of feature name to importance
-        importance_dict = {}
-        for i, name in enumerate(feature_names):
-            if i < len(avg_importances):
-                importance_dict[name] = avg_importances[i]
-        
-        # Sort features by importance and get top N
-        sorted_features = sorted(importance_dict.items(), key=lambda x: x[1], reverse=True)[:top_n]
-        features = [item[0] for item in sorted_features]
-        importance_values = [item[1] for item in sorted_features]
-        
-        # Create plot
-        plt.figure(figsize=figsize)
-        plt.barh(features, importance_values, color='steelblue')
-        plt.xlabel('Average Importance', fontsize=14)
-        plt.ylabel('Features', fontsize=14)
-        plt.title('Top Feature Importance Across All Models', fontsize=16)
-        plt.gca().invert_yaxis()  # Highest importance at the top
-        plt.tight_layout()
-        
-        # Save if path is provided
-        if save_path:
-            plt.savefig(save_path)
-            print(f"Feature importance plot saved to: {save_path}")
+        # Use the forecaster's plot_feature_importance method directly
+        self.forecaster.plot_feature_importance(top_n=top_n)
     
     def get_metrics(self):
         """

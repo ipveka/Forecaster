@@ -16,6 +16,7 @@ import logging
 plt.style.use('seaborn-v0_8-whitegrid')
 sns.set_context("talk")
 
+
 def generate_sample_data(freq='W', periods=156):
     """
     Generate sample time series data with the specified frequency.
@@ -343,7 +344,7 @@ def get_frequency_params(freq):
             'fe_window_size': (14, 28),
             'bs_window_size': 14,
             'lags': (7, 14, 28, 35),
-            'periods': 1095  # 3 years of daily data
+            'periods': 1095 
         }
     elif freq == 'W':
         # Weekly
@@ -353,7 +354,7 @@ def get_frequency_params(freq):
             'fe_window_size': (4, 13),
             'bs_window_size': 13,
             'lags': (13, 26, 39, 52),
-            'periods': 156  # 3 years of weekly data
+            'periods': 156
         }
     else:  
         # Monthly
@@ -363,5 +364,5 @@ def get_frequency_params(freq):
             'fe_window_size': (2, 6),
             'bs_window_size': 4,
             'lags': (4, 8, 12),
-            'periods': 36  # 3 years of monthly data
+            'periods': 36
         }

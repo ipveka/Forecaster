@@ -1030,29 +1030,32 @@ class Forecaster:
         return adjusted_data
 
     # Plot feature importance
-    def plot_feature_importance(self):
+    def plot_feature_importance(self, top_n=15):
         """
         Plot the average feature importance across all cutoffs and training groups.
+        
+        Parameters:
+        top_n (int): Number of top features to display (default: 15)
         """
         if not self.feature_importances:
             print("No feature importances available. Make sure you've trained models first.")
             return
-
+        
         # Initialize dictionaries to store cumulative importances and feature counts
         cumulative_importances = {}
         feature_counts = {}
-
+        
         # Sum up importances across all cutoffs and training groups
         for (cutoff, training_group_val), importances in self.feature_importances.items():
             model_key = (cutoff, training_group_val)
-
+            
             # Check if the model exists for this (cutoff, training_group_val)
             if model_key not in self.models:
                 print(f"Model for {model_key} not found, skipping...")
                 continue
-
+                
             model = self.models[model_key]
-
+            
             for idx, importance in enumerate(importances):
                 # Get feature name and handle missing or misaligned feature indices
                 try:
@@ -1060,29 +1063,39 @@ class Forecaster:
                 except IndexError:
                     print(f"Feature index {idx} out of range for model {model_key}, skipping...")
                     continue
-
+                
                 # Aggregate importance for this feature
                 if feature not in cumulative_importances:
                     cumulative_importances[feature] = 0
                     feature_counts[feature] = 0
+                
                 cumulative_importances[feature] += importance
                 feature_counts[feature] += 1
-
+        
         # Calculate average importances
         avg_importances = {feature: imp / feature_counts[feature]
-                          for feature, imp in cumulative_importances.items()}
-
-        # Sort features by importance
+                        for feature, imp in cumulative_importances.items()}
+        
+        # Sort features by importance and limit to top_n
         sorted_features = sorted(avg_importances.items(), key=lambda x: x[1], reverse=True)
+        sorted_features = sorted_features[:top_n]  # Limit to top_n features
+        
         features = [item[0] for item in sorted_features]
         importances = [item[1] for item in sorted_features]
-
+        
         # Plot
         plt.figure(figsize=(12, 8))
         plt.barh(features, importances, color='steelblue')
         plt.xlabel('Average Importance', fontsize=14)
         plt.ylabel('Features', fontsize=14)
-        plt.title('Average Feature Importance Across Cutoffs and Training Groups', fontsize=16)
+        
+        # Update title to reflect the number of features shown
+        total_features = len(avg_importances)
+        if total_features > top_n:
+            plt.title(f'Top {top_n} Features by Average Importance (out of {total_features} total)', fontsize=16)
+        else:
+            plt.title('Average Feature Importance Across Cutoffs and Training Groups', fontsize=16)
+        
         plt.gca().invert_yaxis()
         plt.tight_layout()
         plt.show()
