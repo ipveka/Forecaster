@@ -1,40 +1,36 @@
 # General libraries
-import pandas as pd
-import numpy as np
-import warnings
-import lightgbm
 import gc
+import multiprocessing
 import os
-
-# Plots
-from matplotlib import pyplot as plt
-
-# Sklearn
-from sklearn.metrics import mean_squared_error
-
-# Forecaster
-from lightgbm import LGBMRegressor
-
+import warnings
 # Multiprocessing
 from concurrent.futures import ProcessPoolExecutor
-import multiprocessing
 from functools import partial
+from math import ceil
+from time import sleep
 
+import lightgbm
+import matplotlib.dates as mdates
 # Plots
 import matplotlib.pyplot as plt
-import matplotlib.dates as mdates
-from IPython import display
-from time import sleep
-from math import ceil
-
+import numpy as np
+import pandas as pd
 # Cuda
 import torch
+from IPython import display
+# Forecaster
+from lightgbm import LGBMRegressor
+# Plots
+from matplotlib import pyplot as plt
+# Sklearn
+from sklearn.metrics import mean_squared_error
 
 # Options
 warnings.filterwarnings("ignore", category=DeprecationWarning)
 warnings.filterwarnings("ignore", category=UserWarning)
-warnings.simplefilter(action='ignore', category=pd.errors.PerformanceWarning)
+warnings.simplefilter(action="ignore", category=pd.errors.PerformanceWarning)
 pd.options.mode.chained_assignment = None
+
 
 # Evaluator class
 class Evaluator:
@@ -60,7 +56,7 @@ class Evaluator:
 
         :return: Filtered DataFrame with only test samples and non-zero actual sales
         """
-        return self.df[(self.df['sample'] == 'test') & (self.df[self.actuals_col] != 0)]
+        return self.df[(self.df["sample"] == "test") & (self.df[self.actuals_col] != 0)]
 
     # Remove nan
     def _remove_nan(self, actuals, predictions):
@@ -96,14 +92,22 @@ class Evaluator:
         :return: MAPE value
         """
         actuals, predictions = self._remove_nan(actuals, predictions)
-        
+
         # Avoid division by zero by filtering out zero values in actuals
         non_zero_actuals = actuals != 0
         if np.any(non_zero_actuals):
-            return np.mean(np.abs((actuals[non_zero_actuals] - predictions[non_zero_actuals]) / actuals[non_zero_actuals])) * 100
+            return (
+                np.mean(
+                    np.abs(
+                        (actuals[non_zero_actuals] - predictions[non_zero_actuals])
+                        / actuals[non_zero_actuals]
+                    )
+                )
+                * 100
+            )
         else:
             return np.nan
-        
+
     # Calculate WMAPE
     def calculate_wmape(self, actuals, predictions):
         """
@@ -115,7 +119,7 @@ class Evaluator:
         """
         actuals, predictions = self._remove_nan(actuals, predictions)
         total_actuals = np.sum(actuals)
-        
+
         # Avoid division by zero by checking if total actuals sum to zero
         if total_actuals != 0:
             return np.sum(np.abs(actuals - predictions)) / total_actuals * 100
@@ -149,7 +153,7 @@ class Evaluator:
         score = abs_err + abs(err)
 
         total_objective = np.sum(actuals)
-        
+
         # Avoid division by zero for custom metric
         if total_objective != 0:
             score /= total_objective
@@ -158,7 +162,7 @@ class Evaluator:
 
         return score * 100
 
-    # Evaluate
+    # Evaluate
     def evaluate(self):
         """
         Evaluate RMSE, MAE, MAPE, WMAPE, and custom metric for baseline and all prediction models.
@@ -171,36 +175,57 @@ class Evaluator:
         baseline = test_data[self.baseline_col].values
 
         # Initialize metrics dictionary using the baseline column name
-        metrics = {metric: {self.baseline_col: None} for metric in ['RMSE', 'MAE', 'MAPE', 'WMAPE', 'Custom Metric']}
+        metrics = {
+            metric: {self.baseline_col: None}
+            for metric in ["RMSE", "MAE", "MAPE", "WMAPE", "Custom Metric"]
+        }
 
         # Calculate metrics for baseline
         for metric in metrics:
-            if metric == 'RMSE':
-                metrics[metric][self.baseline_col] = self.calculate_rmse(actuals, baseline)
-            elif metric == 'MAE':
-                metrics[metric][self.baseline_col] = self.calculate_mae(actuals, baseline)
-            elif metric == 'MAPE':
-                metrics[metric][self.baseline_col] = self.calculate_mape(actuals, baseline)
-            elif metric == 'WMAPE':
-                metrics[metric][self.baseline_col] = self.calculate_wmape(actuals, baseline)
-            elif metric == 'Custom Metric':
-                metrics[metric][self.baseline_col] = self.calculate_custom_metric(actuals, baseline)
+            if metric == "RMSE":
+                metrics[metric][self.baseline_col] = self.calculate_rmse(
+                    actuals, baseline
+                )
+            elif metric == "MAE":
+                metrics[metric][self.baseline_col] = self.calculate_mae(
+                    actuals, baseline
+                )
+            elif metric == "MAPE":
+                metrics[metric][self.baseline_col] = self.calculate_mape(
+                    actuals, baseline
+                )
+            elif metric == "WMAPE":
+                metrics[metric][self.baseline_col] = self.calculate_wmape(
+                    actuals, baseline
+                )
+            elif metric == "Custom Metric":
+                metrics[metric][self.baseline_col] = self.calculate_custom_metric(
+                    actuals, baseline
+                )
 
         # Calculate metrics for each prediction model
         for pred_col in self.preds_cols:
             predictions = test_data[pred_col].values
 
             for metric in metrics:
-                if metric == 'RMSE':
-                    metrics[metric][pred_col] = self.calculate_rmse(actuals, predictions)
-                elif metric == 'MAE':
+                if metric == "RMSE":
+                    metrics[metric][pred_col] = self.calculate_rmse(
+                        actuals, predictions
+                    )
+                elif metric == "MAE":
                     metrics[metric][pred_col] = self.calculate_mae(actuals, predictions)
-                elif metric == 'MAPE':
-                    metrics[metric][pred_col] = self.calculate_mape(actuals, predictions)
-                elif metric == 'WMAPE':
-                    metrics[metric][pred_col] = self.calculate_wmape(actuals, predictions)
-                elif metric == 'Custom Metric':
-                    metrics[metric][pred_col] = self.calculate_custom_metric(actuals, predictions)
+                elif metric == "MAPE":
+                    metrics[metric][pred_col] = self.calculate_mape(
+                        actuals, predictions
+                    )
+                elif metric == "WMAPE":
+                    metrics[metric][pred_col] = self.calculate_wmape(
+                        actuals, predictions
+                    )
+                elif metric == "Custom Metric":
+                    metrics[metric][pred_col] = self.calculate_custom_metric(
+                        actuals, predictions
+                    )
 
         return metrics
 
@@ -220,7 +245,7 @@ class Evaluator:
         metric_table = metric_table.round(2)
 
         return metric_table
-    
+
     # Calculate metrics
     def _calculate_metric(self, metric_name, actuals, predictions):
         """
@@ -231,15 +256,15 @@ class Evaluator:
         :param predictions: The predicted values
         :return: The calculated metric value
         """
-        if metric_name == 'RMSE':
+        if metric_name == "RMSE":
             return self.calculate_rmse(actuals, predictions)
-        elif metric_name == 'MAE':
+        elif metric_name == "MAE":
             return self.calculate_mae(actuals, predictions)
-        elif metric_name == 'MAPE':
+        elif metric_name == "MAPE":
             return self.calculate_mape(actuals, predictions)
-        elif metric_name == 'WMAPE':
+        elif metric_name == "WMAPE":
             return self.calculate_wmape(actuals, predictions)
-        elif metric_name == 'Custom Metric':
+        elif metric_name == "Custom Metric":
             return self.calculate_custom_metric(actuals, predictions)
         else:
             raise ValueError(f"Unknown metric: {metric_name}")
@@ -248,7 +273,7 @@ class Evaluator:
     def calculate_grouped_metric(self, metric_name, group_col, group_filter=None):
         """
         Calculate the specified metric grouped by the specified column,
-        including baseline and all prediction models. Optionally filter 
+        including baseline and all prediction models. Optionally filter
         groups based on a specified range or list of values.
 
         :param metric_name: The name of the metric to calculate (e.g., 'RMSE', 'MAE', etc.)
@@ -280,12 +305,16 @@ class Evaluator:
 
             # Calculate baseline metrics
             baseline_predictions = group_data[self.baseline_col].values
-            current_row['Baseline'] = self._calculate_metric(metric_name, group_actuals, baseline_predictions)
+            current_row["Baseline"] = self._calculate_metric(
+                metric_name, group_actuals, baseline_predictions
+            )
 
             # Calculate metrics for each prediction column
             for pred_col in self.preds_cols:
                 predictions = group_data[pred_col].values
-                current_row[pred_col] = self._calculate_metric(metric_name, group_actuals, predictions)
+                current_row[pred_col] = self._calculate_metric(
+                    metric_name, group_actuals, predictions
+                )
 
             # Append the current row of metrics to the list
             metric_values.append(current_row)

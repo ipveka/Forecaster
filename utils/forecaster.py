@@ -1,113 +1,106 @@
 # General libraries
-import pandas as pd
-import numpy as np
-import warnings
-import lightgbm
 import gc
+import multiprocessing
 import os
-
-# Plots
-from matplotlib import pyplot as plt
-
-# Sklearn
-from sklearn.preprocessing import LabelEncoder
-from sklearn.preprocessing import MinMaxScaler
-from sklearn.metrics import mean_squared_error
-from sklearn.model_selection import train_test_split
-from sklearn.model_selection import TimeSeriesSplit
-from sklearn.experimental import enable_halving_search_cv
-from sklearn.model_selection import HalvingRandomSearchCV
-from sklearn.model_selection import RandomizedSearchCV
-from sklearn.model_selection import GridSearchCV
-from sklearn.feature_selection import mutual_info_regression
-
-# Models
-from lightgbm import LGBMRegressor
-from sklearn.ensemble import RandomForestRegressor
-from sklearn.ensemble import GradientBoostingRegressor
-from sklearn.ensemble import AdaBoostRegressor
-from sklearn.linear_model import LinearRegression
-
-# Statsmodels
-from statsmodels.tsa.seasonal import seasonal_decompose
-
+import warnings
 # Multiprocessing
 from concurrent.futures import ProcessPoolExecutor
-import multiprocessing
 from functools import partial
+from math import ceil
+from time import sleep
 
+import lightgbm
+import matplotlib.dates as mdates
 # Plots
 import matplotlib.pyplot as plt
-import matplotlib.dates as mdates
-from IPython import display
-from time import sleep
-from math import ceil
-
+import numpy as np
+import pandas as pd
 # Cuda
 import torch
+from IPython import display
+# Models
+from lightgbm import LGBMRegressor
+# Plots
+from matplotlib import pyplot as plt
+from sklearn.ensemble import (AdaBoostRegressor, GradientBoostingRegressor,
+                              RandomForestRegressor)
+from sklearn.experimental import enable_halving_search_cv
+from sklearn.feature_selection import mutual_info_regression
+from sklearn.linear_model import LinearRegression
+from sklearn.metrics import mean_squared_error
+from sklearn.model_selection import (GridSearchCV, HalvingRandomSearchCV,
+                                     RandomizedSearchCV, TimeSeriesSplit,
+                                     train_test_split)
+# Sklearn
+from sklearn.preprocessing import LabelEncoder, MinMaxScaler
+# Statsmodels
+from statsmodels.tsa.seasonal import seasonal_decompose
 
 # Options
 warnings.filterwarnings("ignore", category=DeprecationWarning)
 warnings.filterwarnings("ignore", category=UserWarning)
-warnings.simplefilter(action='ignore', category=pd.errors.PerformanceWarning)
+warnings.simplefilter(action="ignore", category=pd.errors.PerformanceWarning)
 pd.options.mode.chained_assignment = None
 
 # Define estimator map
 estimator_map = {
-    'LGBM': LGBMRegressor(n_jobs=-1, objective='regression', random_state=42, verbose=-1),
-    'RF': RandomForestRegressor(random_state=42, verbose=-1),
-    'GBM': GradientBoostingRegressor(random_state=42, verbose=-1),
-    'ADA': AdaBoostRegressor(random_state=42),
-    'LR': LinearRegression()
+    "LGBM": LGBMRegressor(
+        n_jobs=-1, objective="regression", random_state=42, verbose=-1
+    ),
+    "RF": RandomForestRegressor(random_state=42, verbose=-1),
+    "GBM": GradientBoostingRegressor(random_state=42, verbose=-1),
+    "ADA": AdaBoostRegressor(random_state=42),
+    "LR": LinearRegression(),
 }
 
 # Define parameter dictionary
 hyperparam_dictionary = {
-    'LGBM': {
-        'learning_rate': [0.01, 0.05, 0.1],
-        'n_estimators': [500, 1000, 2000],
-        'num_leaves': [15, 31, 64],
-        'max_depth': [4, 8, 12],
-        'subsample': [0.6, 0.8, 1.0],
-        'colsample_bytree': [0.6, 0.8, 1.0],
-        'reg_alpha': [0.0, 0.1, 0.5],
-        'reg_lambda': [0.0, 0.1, 0.5]
+    "LGBM": {
+        "learning_rate": [0.01, 0.05, 0.1],
+        "n_estimators": [500, 1000, 2000],
+        "num_leaves": [15, 31, 64],
+        "max_depth": [4, 8, 12],
+        "subsample": [0.6, 0.8, 1.0],
+        "colsample_bytree": [0.6, 0.8, 1.0],
+        "reg_alpha": [0.0, 0.1, 0.5],
+        "reg_lambda": [0.0, 0.1, 0.5],
     },
-    'RF': {
-        'n_estimators': [100, 500, 1000, 1500],
-        'max_depth': [8, 16, 32, 64, None],
-        'min_samples_split': [2, 5, 10],
-        'min_samples_leaf': [1, 2, 4],
-        'max_features': ['sqrt', 'log2', None],
-        'criterion': ['squared_error', 'absolute_error'],
-        'bootstrap': [True, False],
-        'max_samples': [0.5, 0.7, 0.9]
+    "RF": {
+        "n_estimators": [100, 500, 1000, 1500],
+        "max_depth": [8, 16, 32, 64, None],
+        "min_samples_split": [2, 5, 10],
+        "min_samples_leaf": [1, 2, 4],
+        "max_features": ["sqrt", "log2", None],
+        "criterion": ["squared_error", "absolute_error"],
+        "bootstrap": [True, False],
+        "max_samples": [0.5, 0.7, 0.9],
     },
-    'GBM': {
-        'n_estimators': [100, 300, 500, 1000],
-        'learning_rate': [0.01, 0.05, 0.1, 0.2],
-        'max_depth': [3, 4, 6, 8],
-        'min_samples_split': [2, 5, 10],
-        'min_samples_leaf': [1, 2, 4],
-        'subsample': [0.6, 0.8, 1.0],
-        'max_features': ['sqrt', 'log2', None],
-        'validation_fraction': [0.1, 0.2]
+    "GBM": {
+        "n_estimators": [100, 300, 500, 1000],
+        "learning_rate": [0.01, 0.05, 0.1, 0.2],
+        "max_depth": [3, 4, 6, 8],
+        "min_samples_split": [2, 5, 10],
+        "min_samples_leaf": [1, 2, 4],
+        "subsample": [0.6, 0.8, 1.0],
+        "max_features": ["sqrt", "log2", None],
+        "validation_fraction": [0.1, 0.2],
     },
-    'ADA': {
-        'n_estimators': [50, 100, 200, 500],
-        'learning_rate': [0.01, 0.05, 0.1, 0.3],
-        'algorithm': ['SAMME', 'SAMME.R'],
-        'random_state': [42]
+    "ADA": {
+        "n_estimators": [50, 100, 200, 500],
+        "learning_rate": [0.01, 0.05, 0.1, 0.3],
+        "algorithm": ["SAMME", "SAMME.R"],
+        "random_state": [42],
     },
-    'LR': {
-        'alpha': [0.001, 0.01, 0.1, 1.0, 10, 100, 500],
-        'fit_intercept': [True, False],
-        'solver': ['svd', 'cholesky', 'lsqr', 'sag'],
-        'max_iter': [1000],
-        'normalize': [True, False],
-        'tol': [1e-4, 1e-3]
-    }
+    "LR": {
+        "alpha": [0.001, 0.01, 0.1, 1.0, 10, 100, 500],
+        "fit_intercept": [True, False],
+        "solver": ["svd", "cholesky", "lsqr", "sag"],
+        "max_iter": [1000],
+        "normalize": [True, False],
+        "tol": [1e-4, 1e-3],
+    },
 }
+
 
 # Forecaster class
 class Forecaster:
@@ -115,7 +108,7 @@ class Forecaster:
     def __init__(self, df_input):
         """
         Initialize the Forecaster class.
-        
+
         Parameters:
         df_input (pd.DataFrame): Input DataFrame
         """
@@ -124,31 +117,28 @@ class Forecaster:
         self.feature_importances = {}
         self.best_hyperparams = {}
         self.heuristic_params = {}
-    
+
     # Param heuristics
-    def create_param_heuristics(self, X_train, model_type='LGBM'):
+    def create_param_heuristics(self, X_train, model_type="LGBM"):
         """
         Create heuristic-based hyperparameters based on dataset characteristics.
-        
+
         Parameters:
         X_train (pd.DataFrame): Training features
         model_type (str): Type of model ('LGBM', 'RF', 'GBM', 'ADA', 'LR')
-        
+
         Returns:
         model: Configured model with heuristic hyperparameters
         """
         # Get dataset characteristics
         n_samples = X_train.shape[0]
         n_features = X_train.shape[1]
-        
+
         # Store characteristics for logging
-        dataset_info = {
-            'n_samples': n_samples,
-            'n_features': n_features
-        }
-        
+        dataset_info = {"n_samples": n_samples, "n_features": n_features}
+
         # Create heuristic parameters based on model type
-        if model_type == 'LGBM':
+        if model_type == "LGBM":
             # LightGBM heuristics
             # 1. n_estimators: More data/features -> more trees needed
             if n_samples < 1000:
@@ -159,7 +149,7 @@ class Forecaster:
                 n_estimators = 1000
             else:
                 n_estimators = 1500
-                
+
             # 2. learning_rate: Adjust based on n_estimators
             if n_estimators <= 100:
                 learning_rate = 0.1
@@ -167,7 +157,7 @@ class Forecaster:
                 learning_rate = 0.05
             else:
                 learning_rate = 0.01
-                
+
             # 3. max_depth: Adjust based on n_features
             if n_features < 10:
                 max_depth = 5
@@ -177,11 +167,11 @@ class Forecaster:
                 max_depth = 9
             else:
                 max_depth = 12
-                
+
             # 4. num_leaves: Related to max_depth but with some constraints
             # Rule of thumb: num_leaves = 2^(max_depth) but capped for better generalization
             num_leaves = min(2**max_depth, 127)  # Cap at 127 to prevent overfitting
-            
+
             # 5. min_data_in_leaf: More data -> can afford larger min_data_in_leaf
             if n_samples < 1000:
                 min_data_in_leaf = 5
@@ -191,7 +181,7 @@ class Forecaster:
                 min_data_in_leaf = 20
             else:
                 min_data_in_leaf = 50
-                
+
             # 6. feature_fraction: More features -> lower feature_fraction to prevent overfitting
             if n_features < 10:
                 feature_fraction = 1.0
@@ -201,7 +191,7 @@ class Forecaster:
                 feature_fraction = 0.8
             else:
                 feature_fraction = 0.7
-                
+
             # 7. bagging_fraction: Similar logic to feature_fraction
             if n_samples < 1000:
                 bagging_fraction = 1.0
@@ -211,7 +201,7 @@ class Forecaster:
                 bagging_fraction = 0.8
             else:
                 bagging_fraction = 0.7
-                
+
             # 8. Regularization: More features -> stronger regularization
             if n_features < 20:
                 reg_alpha = 0.0
@@ -225,7 +215,7 @@ class Forecaster:
             else:
                 reg_alpha = 0.05
                 reg_lambda = 0.1
-                
+
             # Create model with heuristic parameters
             model = LGBMRegressor(
                 n_estimators=n_estimators,
@@ -238,26 +228,26 @@ class Forecaster:
                 reg_alpha=reg_alpha,
                 reg_lambda=reg_lambda,
                 n_jobs=-1,
-                objective='regression',
+                objective="regression",
                 random_state=42,
-                verbose=-1
+                verbose=-1,
             )
-            
+
             # Store parameters for logging
             self.heuristic_params[model_type] = {
-                'n_estimators': n_estimators,
-                'learning_rate': learning_rate,
-                'max_depth': max_depth,
-                'num_leaves': num_leaves,
-                'min_child_samples': min_data_in_leaf,
-                'colsample_bytree': feature_fraction,
-                'subsample': bagging_fraction,
-                'reg_alpha': reg_alpha,
-                'reg_lambda': reg_lambda,
-                'dataset_info': dataset_info
+                "n_estimators": n_estimators,
+                "learning_rate": learning_rate,
+                "max_depth": max_depth,
+                "num_leaves": num_leaves,
+                "min_child_samples": min_data_in_leaf,
+                "colsample_bytree": feature_fraction,
+                "subsample": bagging_fraction,
+                "reg_alpha": reg_alpha,
+                "reg_lambda": reg_lambda,
+                "dataset_info": dataset_info,
             }
-            
-        elif model_type == 'RF':
+
+        elif model_type == "RF":
             # Random Forest heuristics
             # Adjust n_estimators based on dataset size
             if n_samples < 1000:
@@ -266,7 +256,7 @@ class Forecaster:
                 n_estimators = 200
             else:
                 n_estimators = 500
-                
+
             # Adjust max_depth based on n_features
             if n_features < 10:
                 max_depth = 10
@@ -274,7 +264,7 @@ class Forecaster:
                 max_depth = 20
             else:
                 max_depth = 30
-                
+
             # Adjust min_samples_split and min_samples_leaf based on dataset size
             if n_samples < 1000:
                 min_samples_split = 2
@@ -285,7 +275,7 @@ class Forecaster:
             else:
                 min_samples_split = 10
                 min_samples_leaf = 4
-                
+
             # Create model with heuristic parameters
             model = RandomForestRegressor(
                 n_estimators=n_estimators,
@@ -294,19 +284,19 @@ class Forecaster:
                 min_samples_leaf=min_samples_leaf,
                 n_jobs=-1,
                 random_state=42,
-                verbose=-1
+                verbose=-1,
             )
-            
+
             # Store parameters for logging
             self.heuristic_params[model_type] = {
-                'n_estimators': n_estimators,
-                'max_depth': max_depth,
-                'min_samples_split': min_samples_split,
-                'min_samples_leaf': min_samples_leaf,
-                'dataset_info': dataset_info
+                "n_estimators": n_estimators,
+                "max_depth": max_depth,
+                "min_samples_split": min_samples_split,
+                "min_samples_leaf": min_samples_leaf,
+                "dataset_info": dataset_info,
             }
-            
-        elif model_type == 'GBM':
+
+        elif model_type == "GBM":
             # Gradient Boosting heuristics
             # Adjust n_estimators based on dataset size
             if n_samples < 1000:
@@ -318,7 +308,7 @@ class Forecaster:
             else:
                 n_estimators = 500
                 learning_rate = 0.02
-                
+
             # Adjust max_depth based on n_features
             if n_features < 10:
                 max_depth = 3
@@ -326,25 +316,25 @@ class Forecaster:
                 max_depth = 4
             else:
                 max_depth = 5
-                
+
             # Create model with heuristic parameters
             model = GradientBoostingRegressor(
                 n_estimators=n_estimators,
                 learning_rate=learning_rate,
                 max_depth=max_depth,
                 random_state=42,
-                verbose=-1
+                verbose=-1,
             )
-            
+
             # Store parameters for logging
             self.heuristic_params[model_type] = {
-                'n_estimators': n_estimators,
-                'learning_rate': learning_rate,
-                'max_depth': max_depth,
-                'dataset_info': dataset_info
+                "n_estimators": n_estimators,
+                "learning_rate": learning_rate,
+                "max_depth": max_depth,
+                "dataset_info": dataset_info,
             }
-            
-        elif model_type == 'ADA':
+
+        elif model_type == "ADA":
             # AdaBoost heuristics
             # Adjust n_estimators based on dataset size
             if n_samples < 1000:
@@ -356,38 +346,41 @@ class Forecaster:
             else:
                 n_estimators = 200
                 learning_rate = 0.3
-                
+
             # Create model with heuristic parameters
             model = AdaBoostRegressor(
-                n_estimators=n_estimators,
-                learning_rate=learning_rate,
-                random_state=42
+                n_estimators=n_estimators, learning_rate=learning_rate, random_state=42
             )
-            
+
             # Store parameters for logging
             self.heuristic_params[model_type] = {
-                'n_estimators': n_estimators,
-                'learning_rate': learning_rate,
-                'dataset_info': dataset_info
+                "n_estimators": n_estimators,
+                "learning_rate": learning_rate,
+                "dataset_info": dataset_info,
             }
-            
+
         else:  # Linear Regression or other models
             # For Linear Regression, no hyperparameters to tune
             model = LinearRegression()
-            
+
             # Store parameters for logging
-            self.heuristic_params[model_type] = {
-                'dataset_info': dataset_info
-            }
-            
+            self.heuristic_params[model_type] = {"dataset_info": dataset_info}
+
         return model
 
-    # Remove outliers
-    def remove_outliers(self, column, group_cols, lower_quantile=0.025, upper_quantile=0.975, ts_decomposition=False):
+    # Remove outliers
+    def remove_outliers(
+        self,
+        column,
+        group_cols,
+        lower_quantile=0.025,
+        upper_quantile=0.975,
+        ts_decomposition=False,
+    ):
         """
         Cap the outliers in a specified column for each group defined by group_cols.
         Optionally, use time series decomposition to detect outliers in the residuals.
-        
+
         Parameters:
         - column: The column from which to remove outliers.
         - group_cols: The columns to group by for calculating quantiles.
@@ -405,7 +398,9 @@ class Forecaster:
                     continue
 
                 # Decompose the time series
-                result = seasonal_decompose(group_data[column], model='additive', period=1)
+                result = seasonal_decompose(
+                    group_data[column], model="additive", period=1
+                )
                 residual = result.resid
 
                 # Calculate lower and upper bounds for residuals
@@ -416,12 +411,18 @@ class Forecaster:
                 outlier_mask = (residual < lower_bounds) | (residual > upper_bounds)
 
                 # Replace the outliers in the original column based on the outlier mask
-                self.df.loc[outlier_mask, column] = np.clip(self.df.loc[outlier_mask, column], lower_bounds, upper_bounds)
+                self.df.loc[outlier_mask, column] = np.clip(
+                    self.df.loc[outlier_mask, column], lower_bounds, upper_bounds
+                )
 
         else:
             # Calculate lower and upper bounds for each group, excluding NaNs
-            lower_bounds = self.df.groupby(group_cols)[column].transform(lambda x: x.dropna().quantile(lower_quantile))
-            upper_bounds = self.df.groupby(group_cols)[column].transform(lambda x: x.dropna().quantile(upper_quantile))
+            lower_bounds = self.df.groupby(group_cols)[column].transform(
+                lambda x: x.dropna().quantile(lower_quantile)
+            )
+            upper_bounds = self.df.groupby(group_cols)[column].transform(
+                lambda x: x.dropna().quantile(upper_quantile)
+            )
 
             # Cap the outliers using vectorized operations
             self.df[column] = np.clip(self.df[column], lower_bounds, upper_bounds)
@@ -438,8 +439,8 @@ class Forecaster:
         """
         try:
             # Filter data for training and testing
-            train_data = df[df['sample'] == 'train']
-            test_data = df[df['sample'] == 'test']
+            train_data = df[df["sample"] == "train"]
+            test_data = df[df["sample"] == "test"]
 
             # Separate features and target variable
             X_train = train_data[features]
@@ -455,9 +456,11 @@ class Forecaster:
         except Exception as e:
             print(f"Error occurred in prepare_data function: {str(e)}")
             raise
-    
+
     # Prepare features for selection
-    def prepare_features_for_selection(self, train_data, group_cols, numeric_features, target_col, sample_fraction=0.25):
+    def prepare_features_for_selection(
+        self, train_data, group_cols, numeric_features, target_col, sample_fraction=0.25
+    ):
         """
         This function prepares the features for selection by:
 
@@ -489,7 +492,9 @@ class Forecaster:
         sampled_group_ids = unique_group_ids.sample(n=sample_size, random_state=42)
 
         # Filter the original dataset by performing a merge on the sampled group IDs
-        train_data_sampled = pd.merge(train_data, sampled_group_ids, on=group_cols, how='inner')
+        train_data_sampled = pd.merge(
+            train_data, sampled_group_ids, on=group_cols, how="inner"
+        )
 
         # Fill NA with 0 for the selected data
         train_data_filled = train_data_sampled.fillna(0)
@@ -513,7 +518,7 @@ class Forecaster:
         """
         try:
             # Select only float64 columns
-            numeric_features = X.select_dtypes(include=['float64']).columns
+            numeric_features = X.select_dtypes(include=["float64"]).columns
 
             if len(numeric_features) == 0:
                 print("Warning: No float64 features found for feature selection.")
@@ -522,8 +527,12 @@ class Forecaster:
             # Validate group columns exist in X
             for col in group_cols:
                 if col not in X.columns:
-                    print(f"Warning: Group column '{col}' not found in features. Skipping feature selection.")
-                    return numeric_features.tolist()[:min(n_best_features, len(numeric_features))]
+                    print(
+                        f"Warning: Group column '{col}' not found in features. Skipping feature selection."
+                    )
+                    return numeric_features.tolist()[
+                        : min(n_best_features, len(numeric_features))
+                    ]
 
             # Concatenate X and y to ensure both are cleaned of NaN rows simultaneously
             data = pd.concat([X[group_cols], X[numeric_features], y], axis=1)
@@ -532,8 +541,12 @@ class Forecaster:
             data = data.dropna(subset=[y.name] + numeric_features.tolist())
 
             if data.empty:
-                print("Warning: No valid data for feature selection after removing NaN values.")
-                return numeric_features.tolist()[:min(n_best_features, len(numeric_features))]
+                print(
+                    "Warning: No valid data for feature selection after removing NaN values."
+                )
+                return numeric_features.tolist()[
+                    : min(n_best_features, len(numeric_features))
+                ]
 
             # Function to compute MI scores for a group
             def compute_mi_scores(group):
@@ -549,7 +562,9 @@ class Forecaster:
                         if "Expected n_neighbors < n_samples_fit" in str(e):
                             # If the error is due to n_neighbors being greater than n_samples_fit,
                             # set n_neighbors to 1 less than the number of samples
-                            return mutual_info_regression(X_clean, y_clean, n_neighbors=len(X_clean) - 1)
+                            return mutual_info_regression(
+                                X_clean, y_clean, n_neighbors=len(X_clean) - 1
+                            )
                         else:
                             print(f"ValueError in mutual_info_regression: {str(e)}")
                             return np.zeros(len(numeric_features))
@@ -572,30 +587,51 @@ class Forecaster:
 
             # If no valid scores were computed, return all numeric features
             if not all_scores:
-                print("Warning: Could not compute feature importance scores for any group.")
-                return numeric_features.tolist()[:min(n_best_features, len(numeric_features))]
+                print(
+                    "Warning: Could not compute feature importance scores for any group."
+                )
+                return numeric_features.tolist()[
+                    : min(n_best_features, len(numeric_features))
+                ]
 
             # Convert to numpy array and compute the mean
             all_scores_array = np.array(all_scores)
             avg_mi_scores = np.mean(all_scores_array, axis=0)
 
             # Store the features and their average mutual information scores in a DataFrame
-            feature_scores = pd.DataFrame({'feature': numeric_features, 'mi_score': avg_mi_scores})
+            feature_scores = pd.DataFrame(
+                {"feature": numeric_features, "mi_score": avg_mi_scores}
+            )
 
             # Select the n_best_features
-            best_features = feature_scores.nlargest(n_best_features, 'mi_score')['feature'].tolist()
+            best_features = feature_scores.nlargest(n_best_features, "mi_score")[
+                "feature"
+            ].tolist()
             return best_features
 
         except Exception as e:
             print(f"Unexpected error during best feature selection: {str(e)}")
             # Return a subset of numeric features as a fallback
-            if 'numeric_features' in locals() and len(numeric_features) > 0:
-                return numeric_features.tolist()[:min(n_best_features, len(numeric_features))]
+            if "numeric_features" in locals() and len(numeric_features) > 0:
+                return numeric_features.tolist()[
+                    : min(n_best_features, len(numeric_features))
+                ]
             return []
 
     # Tune hyperparameters
-    def _tune_hyperparameters(self, X_train, y_train, model='LGBM', params=None, param_distributions=None, search_method='halving', n_splits=4,
-                              scoring='neg_root_mean_squared_error', n_iter=30, sample_weight=None):
+    def _tune_hyperparameters(
+        self,
+        X_train,
+        y_train,
+        model="LGBM",
+        params=None,
+        param_distributions=None,
+        search_method="halving",
+        n_splits=4,
+        scoring="neg_root_mean_squared_error",
+        n_iter=30,
+        sample_weight=None,
+    ):
         """
         Tune hyperparameters using the specified search method.
         """
@@ -611,29 +647,29 @@ class Forecaster:
         print("Parameter Distribution:", param_dist)
 
         # Choose the search method
-        if search_method == 'grid':
+        if search_method == "grid":
             search = GridSearchCV(
                 estimator=base_model,
                 param_grid=param_dist,
                 cv=tscv,
                 scoring=scoring,
-                error_score='raise',
+                error_score="raise",
                 n_jobs=-1,
-                verbose=1
+                verbose=1,
             )
-        elif search_method == 'random':
+        elif search_method == "random":
             search = RandomizedSearchCV(
                 estimator=base_model,
                 param_distributions=param_dist,
                 n_iter=n_iter,
                 cv=tscv,
                 scoring=scoring,
-                error_score='raise',
+                error_score="raise",
                 n_jobs=-1,
                 verbose=1,
                 random_state=42,
             )
-        elif search_method == 'halving':
+        elif search_method == "halving":
             search = HalvingRandomSearchCV(
                 estimator=base_model,
                 param_distributions=param_dist,
@@ -644,13 +680,15 @@ class Forecaster:
                 cv=tscv,
                 factor=3,
                 scoring=scoring,
-                error_score='raise',
+                error_score="raise",
                 n_jobs=-1,
                 verbose=1,
-                random_state=42
+                random_state=42,
             )
         else:
-            raise ValueError("Invalid search_method. Choose 'grid', 'random', or 'halving'.")
+            raise ValueError(
+                "Invalid search_method. Choose 'grid', 'random', or 'halving'."
+            )
 
         # Perform the search, including sample weights if provided
         if sample_weight is not None:
@@ -659,7 +697,6 @@ class Forecaster:
             search.fit(X_train, y_train)
 
         return search.best_estimator_, search.best_params_
-    
 
     # Count and report NA
     def calculate_nan_inf_percentage(self, X, y):
@@ -688,19 +725,38 @@ class Forecaster:
         # Print results
         print(f"NaNs in X_train: {nan_percentage_X:.2f}% of rows contain NaNs")
         print(f"NaNs in y_train: {nan_percentage_y:.2f}% of rows contain NaNs")
-        print(f"Infinite values in X_train: {inf_percentage_X:.2f}% of rows contain infinite values")
-        print(f"Infinite values in y_train: {inf_percentage_y:.2f}% of rows contain infinite values")
+        print(
+            f"Infinite values in X_train: {inf_percentage_X:.2f}% of rows contain infinite values"
+        )
+        print(
+            f"Infinite values in y_train: {inf_percentage_y:.2f}% of rows contain infinite values"
+        )
 
     # Train model
-    def train_model(self, df, cutoff, features, params, training_group, training_group_val, target_col,
-                    use_weights=False, tune_hyperparameters=False, search_method='halving',
-                    param_distributions=None, scoring='neg_root_mean_squared_error', n_iter=30, 
-                    model='LGBM'):
+    def train_model(
+        self,
+        df,
+        cutoff,
+        features,
+        params,
+        training_group,
+        training_group_val,
+        target_col,
+        use_weights=False,
+        tune_hyperparameters=False,
+        search_method="halving",
+        param_distributions=None,
+        scoring="neg_root_mean_squared_error",
+        n_iter=30,
+        model="LGBM",
+    ):
         """
         Train the model for a specific cutoff and training group, and optionally perform hyperparameter tuning.
         """
         # Prepare the data
-        X_train, y_train, X_test, test_idx, train_idx = self._prepare_data(df, features, target_col)
+        X_train, y_train, X_test, test_idx, train_idx = self._prepare_data(
+            df, features, target_col
+        )
 
         # Report NA and Infs
         # self.calculate_nan_inf_percentage(X_train, y_train)
@@ -710,33 +766,46 @@ class Forecaster:
 
         # Extract sample weights if use_weights is enabled
         if use_weights:
-            train_weights = df.loc[train_idx, 'train_weight'].values
+            train_weights = df.loc[train_idx, "train_weight"].values
         else:
             train_weights = None
 
         # Perform hyperparameter tuning if enabled
         if tune_hyperparameters:
-            print(f"Tuning hyperparameters for cutoff: {cutoff}, training group: {training_group_val} ({training_group})")
+            print(
+                f"Tuning hyperparameters for cutoff: {cutoff}, training group: {training_group_val} ({training_group})"
+            )
             # Tune hyperparams
             model, best_params = self._tune_hyperparameters(
-                X_train, y_train, model=model, params=params, param_distributions=param_distributions,
-                search_method=search_method, scoring=scoring, n_iter=n_iter,
-                sample_weight=train_weights)
+                X_train,
+                y_train,
+                model=model,
+                params=params,
+                param_distributions=param_distributions,
+                search_method=search_method,
+                scoring=scoring,
+                n_iter=n_iter,
+                sample_weight=train_weights,
+            )
             self.models[(cutoff, training_group_val)] = model
             self.best_hyperparams[(cutoff, training_group_val)] = best_params
         else:
             # Use heuristic parameters based on dataset characteristics
-            print(f"Using heuristic parameters for cutoff: {cutoff}, training group: {training_group_val} ({training_group})")
+            print(
+                f"Using heuristic parameters for cutoff: {cutoff}, training group: {training_group_val} ({training_group})"
+            )
             model = self.create_param_heuristics(X_train, model_type=model)
-            
+
             # Log the heuristic parameters used
             print(f"Heuristic parameters for {model}:")
             for param, value in self.heuristic_params.get(model, {}).items():
-                if param != 'dataset_info':
+                if param != "dataset_info":
                     print(f"  • {param}: {value}")
-            
+
             # Also store in best_hyperparams for consistency
-            self.best_hyperparams[(cutoff, training_group_val)] = self.heuristic_params.get(model, {})
+            self.best_hyperparams[(cutoff, training_group_val)] = (
+                self.heuristic_params.get(model, {})
+            )
 
         # Fit the model with or without sample weights
         model.fit(X_train, y_train, sample_weight=train_weights)
@@ -754,50 +823,87 @@ class Forecaster:
         predictions_test = model.predict(X_test)
 
         # Store predictions in the dataframe
-        df.loc[train_idx, 'prediction'] = predictions_train
-        df.loc[test_idx, 'prediction'] = predictions_test
+        df.loc[train_idx, "prediction"] = predictions_train
+        df.loc[test_idx, "prediction"] = predictions_test
 
         return df
 
     # Process cutoff function
-    def process_cutoff(self, cutoff, features, params, target_col, training_group, model,
-                       training_group_values, tune_hyperparameters, search_method,
-                       param_distributions, scoring, n_iter, best_features, n_best_features,
-                       group_cols, baseline_col, use_guardrail, guardrail_limit,
-                       use_weights, current_cutoff_idx, total_cutoffs):
+    def process_cutoff(
+        self,
+        cutoff,
+        features,
+        params,
+        target_col,
+        training_group,
+        model,
+        training_group_values,
+        tune_hyperparameters,
+        search_method,
+        param_distributions,
+        scoring,
+        n_iter,
+        best_features,
+        n_best_features,
+        group_cols,
+        baseline_col,
+        use_guardrail,
+        guardrail_limit,
+        use_weights,
+        current_cutoff_idx,
+        total_cutoffs,
+    ):
         """
         Process cutoff function with progress updates
         """
         try:
             # Calculate and display cutoff progress percentage
             cutoff_progress = (current_cutoff_idx + 1) / total_cutoffs * 100
-            print(f"\nProcessing cutoff {current_cutoff_idx + 1}/{total_cutoffs} ({cutoff_progress:.2f}%) - Cutoff: {cutoff}")
+            print(
+                f"\nProcessing cutoff {current_cutoff_idx + 1}/{total_cutoffs} ({cutoff_progress:.2f}%) - Cutoff: {cutoff}"
+            )
             print("----------------------------------------------------------")
 
             # Create empty object for results
             results_cutoff = []
 
             # Filter for cutoff
-            cutoff_df = self.df[self.df['cutoff'] == cutoff]
+            cutoff_df = self.df[self.df["cutoff"] == cutoff]
 
             # Perform feature selection for this cutoff if requested, using only training data
             if best_features:
-                print(f"Selecting {n_best_features} best numeric features for cutoff {cutoff} using mutual information")
+                print(
+                    f"Selecting {n_best_features} best numeric features for cutoff {cutoff} using mutual information"
+                )
 
                 # Filter scope for train data
-                train_data = cutoff_df[cutoff_df['sample'] == 'train']
+                train_data = cutoff_df[cutoff_df["sample"] == "train"]
                 if train_data.empty:
                     raise ValueError(f"No training data found for cutoff: {cutoff}")
 
                 # Separate numeric and non-numeric features
-                numeric_features = [col for col in features if col in train_data.columns and train_data[col].dtype in ['float64']]
-                non_numeric_features = [col for col in features if col in train_data.columns and train_data[col].dtype not in ['float64']]
+                numeric_features = [
+                    col
+                    for col in features
+                    if col in train_data.columns
+                    and train_data[col].dtype in ["float64"]
+                ]
+                non_numeric_features = [
+                    col
+                    for col in features
+                    if col in train_data.columns
+                    and train_data[col].dtype not in ["float64"]
+                ]
 
                 # Use the helper function to prepare features for selection
                 try:
-                    X_sampled, y_sampled = self.prepare_features_for_selection(train_data, group_cols, numeric_features, target_col)
+                    X_sampled, y_sampled = self.prepare_features_for_selection(
+                        train_data, group_cols, numeric_features, target_col
+                    )
                 except Exception as e:
-                    print(f"Unexpected error during best feature selection sampling and preparation: {str(e)}")
+                    print(
+                        f"Unexpected error during best feature selection sampling and preparation: {str(e)}"
+                    )
                     raise
 
                 # Show number of features before selection
@@ -805,7 +911,9 @@ class Forecaster:
 
                 # Run selection function on numeric features only
                 try:
-                    selected_numeric_features = self.select_best_features(X_sampled, y_sampled, group_cols, n_best_features)
+                    selected_numeric_features = self.select_best_features(
+                        X_sampled, y_sampled, group_cols, n_best_features
+                    )
                 except Exception as e:
                     print(f"Unexpected error during best feature selection: {str(e)}")
                     raise
@@ -814,7 +922,9 @@ class Forecaster:
                 selected_features = selected_numeric_features + non_numeric_features
 
                 # Show number of features after selection
-                print(f"Total number of features after selection: {len(selected_features)}")
+                print(
+                    f"Total number of features after selection: {len(selected_features)}"
+                )
 
                 # Assign new features
                 features_to_use = selected_features
@@ -827,35 +937,65 @@ class Forecaster:
             total_training_groups = len(training_group_values)
             for idx, training_group_val in enumerate(training_group_values):
                 group_progress = (idx + 1) / total_training_groups * 100
-                print(f"Training and predicting for cutoff: {cutoff}, training group: {training_group_val} ({group_progress:.2f}% of groups in cutoff)")
+                print(
+                    f"Training and predicting for cutoff: {cutoff}, training group: {training_group_val} ({group_progress:.2f}% of groups in cutoff)"
+                )
 
                 # Filter scope
-                cutoff_df_tg = cutoff_df[cutoff_df[training_group] == training_group_val]
+                cutoff_df_tg = cutoff_df[
+                    cutoff_df[training_group] == training_group_val
+                ]
 
                 # Train model will save results
                 try:
-                    cutoff_df_results = self.train_model(cutoff_df_tg, cutoff, features_to_use, params, training_group, training_group_val, target_col,
-                                                         use_weights, tune_hyperparameters, search_method, param_distributions, scoring, n_iter, model)
+                    cutoff_df_results = self.train_model(
+                        cutoff_df_tg,
+                        cutoff,
+                        features_to_use,
+                        params,
+                        training_group,
+                        training_group_val,
+                        target_col,
+                        use_weights,
+                        tune_hyperparameters,
+                        search_method,
+                        param_distributions,
+                        scoring,
+                        n_iter,
+                        model,
+                    )
                 except Exception as e:
-                    print(f"Error occurred while training model for cutoff {cutoff}, training group {training_group_val}: {str(e)}")
+                    print(
+                        f"Error occurred while training model for cutoff {cutoff}, training group {training_group_val}: {str(e)}"
+                    )
                     raise
 
                 # Apply guardrail if specified
                 if group_cols and baseline_col and use_guardrail:
-                    print(f"Calculating guardrail for cutoff: {cutoff}, training group: {training_group_val}")
+                    print(
+                        f"Calculating guardrail for cutoff: {cutoff}, training group: {training_group_val}"
+                    )
 
                     # Scope for guardrail
-                    test_data = cutoff_df_results[cutoff_df_results['sample'] == 'test']
+                    test_data = cutoff_df_results[cutoff_df_results["sample"] == "test"]
 
                     # Check if data is available
                     if test_data.empty:
-                        print(f"Warning: No test data found for cutoff {cutoff}, training group {training_group_val}")
+                        print(
+                            f"Warning: No test data found for cutoff {cutoff}, training group {training_group_val}"
+                        )
                     else:
                         try:
-                            adjusted_data = self.calculate_guardrail(test_data, group_cols, baseline_col, guardrail_limit)
-                            cutoff_df_results.loc[cutoff_df_results.index, 'prediction'] = adjusted_data['prediction']
+                            adjusted_data = self.calculate_guardrail(
+                                test_data, group_cols, baseline_col, guardrail_limit
+                            )
+                            cutoff_df_results.loc[
+                                cutoff_df_results.index, "prediction"
+                            ] = adjusted_data["prediction"]
                         except Exception as e:
-                            print(f"Error occurred while calculating guardrail for cutoff {cutoff}, training group {training_group_val}: {str(e)}")
+                            print(
+                                f"Error occurred while calculating guardrail for cutoff {cutoff}, training group {training_group_val}: {str(e)}"
+                            )
                             raise
 
                 # Append the current cutoff_tg_results to results_cutoff
@@ -875,13 +1015,33 @@ class Forecaster:
         return self.process_cutoff(*args)
 
     # Run backtesting
-    def run_backtesting(self, group_cols=None, features=None, params=None, training_group='training_group',
-                        target_col='sales', model='LGBM', tune_hyperparameters=False, search_method='halving',
-                        param_distributions=None, scoring='neg_mean_squared_log_error', n_iter=30, best_features=None,
-                        n_best_features=15, remove_outliers=False, outlier_column=None, lower_quantile=0.025, 
-                        upper_quantile=0.975, ts_decomposition=False, baseline_col=None,
-                        use_guardrail=False, guardrail_limit=2.5, use_weights=False,
-                        use_parallel=True, num_cpus=None):
+    def run_backtesting(
+        self,
+        group_cols=None,
+        features=None,
+        params=None,
+        training_group="training_group",
+        target_col="sales",
+        model="LGBM",
+        tune_hyperparameters=False,
+        search_method="halving",
+        param_distributions=None,
+        scoring="neg_mean_squared_log_error",
+        n_iter=30,
+        best_features=None,
+        n_best_features=15,
+        remove_outliers=False,
+        outlier_column=None,
+        lower_quantile=0.025,
+        upper_quantile=0.975,
+        ts_decomposition=False,
+        baseline_col=None,
+        use_guardrail=False,
+        guardrail_limit=2.5,
+        use_weights=False,
+        use_parallel=True,
+        num_cpus=None,
+    ):
         """
         Train and predict for all cutoff values and training groups in the dataset.
         """
@@ -890,33 +1050,46 @@ class Forecaster:
         try:
             # Validate input
             if features is None:
-                raise ValueError("Features list cannot be None. Pass columns with 'feature' in the name.")
+                raise ValueError(
+                    "Features list cannot be None. Pass columns with 'feature' in the name."
+                )
 
             # Validate group columns
             if group_cols is None:
-                raise ValueError("group_cols cannot be None. Specify the columns used for grouping.")
+                raise ValueError(
+                    "group_cols cannot be None. Specify the columns used for grouping."
+                )
 
             # Assign default parameters
             if params is None:
-                print("User did not provide parameter dictionary, using internal method")
+                print(
+                    "User did not provide parameter dictionary, using internal method"
+                )
                 params = estimator_map
 
             if param_distributions is None:
-                print("User did not provide hyperparameter dictionary, using internal method")
+                print(
+                    "User did not provide hyperparameter dictionary, using internal method"
+                )
                 param_distributions = hyperparam_dictionary
 
             # Remove outliers if specified
             if remove_outliers and outlier_column and group_cols:
                 try:
-                    new_group_cols = group_cols + ['cutoff']
-                    self.remove_outliers(outlier_column, group_cols=new_group_cols, lower_quantile=lower_quantile, upper_quantile=upper_quantile, 
-                                         ts_decomposition=ts_decomposition)
+                    new_group_cols = group_cols + ["cutoff"]
+                    self.remove_outliers(
+                        outlier_column,
+                        group_cols=new_group_cols,
+                        lower_quantile=lower_quantile,
+                        upper_quantile=upper_quantile,
+                        ts_decomposition=ts_decomposition,
+                    )
                 except Exception as e:
                     print(f"Error occurred while removing outliers: {str(e)}")
                     raise
 
             # Get unique cutoffs and training group values
-            cutoffs = self.df['cutoff'].unique()
+            cutoffs = self.df["cutoff"].unique()
             print("Number of cutoffs detected: ", len(cutoffs))
             training_group_values = self.df[training_group].unique()
 
@@ -924,21 +1097,29 @@ class Forecaster:
             if len(cutoffs) == 0:
                 raise ValueError("No cutoff values found in the dataset.")
             elif len(cutoffs) == 1:
-                print("Only one cutoff value found. Processing without parallelization.")
+                print(
+                    "Only one cutoff value found. Processing without parallelization."
+                )
                 use_parallel = False
 
             # Ensure training group values are integers and sort them
             try:
-                training_group_values = sorted([int(val) for val in training_group_values])
+                training_group_values = sorted(
+                    [int(val) for val in training_group_values]
+                )
             except ValueError:
-                raise ValueError(f"Training group values in column '{training_group}' must be convertible to integers.")
+                raise ValueError(
+                    f"Training group values in column '{training_group}' must be convertible to integers."
+                )
 
             # Check if CUDA is available
             if torch.cuda.is_available():
                 print("CUDA is available: Using GPU")
             else:
                 num_cpu = os.cpu_count()
-                print(f"CUDA is not available, using CPU with {num_cpu} available cores")
+                print(
+                    f"CUDA is not available, using CPU with {num_cpu} available cores"
+                )
 
             # Set the number of CPUs to use
             if num_cpus is None:
@@ -950,7 +1131,7 @@ class Forecaster:
 
             # Default guardrail
             if use_guardrail:
-                self.df['guardrail'] = False
+                self.df["guardrail"] = False
 
             # Show selected model
             print("Predictions will be generated with model:", model)
@@ -961,23 +1142,67 @@ class Forecaster:
                 print("----------------------------------------------------------")
                 try:
                     with ProcessPoolExecutor(max_workers=num_cpus) as executor:
-                        args_list = [(c, features, params, target_col, training_group, model,
-                                      training_group_values, tune_hyperparameters, search_method,
-                                      param_distributions, scoring, n_iter, best_features, n_best_features,
-                                      group_cols, baseline_col, use_guardrail, guardrail_limit,
-                                      use_weights, idx, len(cutoffs)) for idx, c in enumerate(cutoffs)]
-                        results = list(executor.map(self.process_cutoff_wrapper, args_list))
+                        args_list = [
+                            (
+                                c,
+                                features,
+                                params,
+                                target_col,
+                                training_group,
+                                model,
+                                training_group_values,
+                                tune_hyperparameters,
+                                search_method,
+                                param_distributions,
+                                scoring,
+                                n_iter,
+                                best_features,
+                                n_best_features,
+                                group_cols,
+                                baseline_col,
+                                use_guardrail,
+                                guardrail_limit,
+                                use_weights,
+                                idx,
+                                len(cutoffs),
+                            )
+                            for idx, c in enumerate(cutoffs)
+                        ]
+                        results = list(
+                            executor.map(self.process_cutoff_wrapper, args_list)
+                        )
                 except Exception as e:
                     print(f"Error occurred during parallel processing: {str(e)}")
                     raise
             else:
                 print(f"Running predictions sequentially")
                 print("----------------------------------------------------------")
-                results = [self.process_cutoff(c, features, params, target_col, training_group, model,
-                                              training_group_values, tune_hyperparameters, search_method,
-                                              param_distributions, scoring, n_iter, best_features, n_best_features,
-                                              group_cols, baseline_col, use_guardrail, guardrail_limit,
-                                              use_weights, idx, len(cutoffs)) for idx, c in enumerate(cutoffs)]
+                results = [
+                    self.process_cutoff(
+                        c,
+                        features,
+                        params,
+                        target_col,
+                        training_group,
+                        model,
+                        training_group_values,
+                        tune_hyperparameters,
+                        search_method,
+                        param_distributions,
+                        scoring,
+                        n_iter,
+                        best_features,
+                        n_best_features,
+                        group_cols,
+                        baseline_col,
+                        use_guardrail,
+                        guardrail_limit,
+                        use_weights,
+                        idx,
+                        len(cutoffs),
+                    )
+                    for idx, c in enumerate(cutoffs)
+                ]
 
             # Combine results
             if len(cutoffs) == 1:
@@ -994,7 +1219,7 @@ class Forecaster:
         except Exception as e:
             print(f"An unexpected error occurred in run_predictions: {str(e)}")
             raise
-    
+
     # Calculate guardrail
     def calculate_guardrail(self, data, group_cols, baseline_col, guardrail_limit=2.5):
         """
@@ -1007,25 +1232,30 @@ class Forecaster:
         :return: DataFrame with adjusted predictions and guardrail indicator
         """
         # Ensure non-negative values for prediction and baseline columns
-        data['prediction'] = data['prediction'].clip(lower=0)
+        data["prediction"] = data["prediction"].clip(lower=0)
         data[baseline_col] = data[baseline_col].clip(lower=0)
 
         def adjust_group(group):
             # Calculate sum of predictions and baseline
-            sum_prediction = group['prediction'].sum()
+            sum_prediction = group["prediction"].sum()
             sum_baseline = group[baseline_col].sum()
 
             # Apply guardrail if condition is met
-            if sum_prediction > guardrail_limit * sum_baseline or sum_prediction < sum_baseline / guardrail_limit:
-                group['prediction'] = (group['prediction'] / 2) + (group[baseline_col] / 2)
-                group['guardrail'] = True
+            if (
+                sum_prediction > guardrail_limit * sum_baseline
+                or sum_prediction < sum_baseline / guardrail_limit
+            ):
+                group["prediction"] = (group["prediction"] / 2) + (
+                    group[baseline_col] / 2
+                )
+                group["guardrail"] = True
             else:
-                group['guardrail'] = False
+                group["guardrail"] = False
             return group
 
         # Apply the adjustment to each group
         adjusted_data = data.groupby(group_cols, group_keys=False).apply(adjust_group)
-        adjusted_data['guardrail'] = adjusted_data['guardrail'].astype(bool)
+        adjusted_data["guardrail"] = adjusted_data["guardrail"].astype(bool)
 
         return adjusted_data
 
@@ -1033,69 +1263,86 @@ class Forecaster:
     def plot_feature_importance(self, top_n=15):
         """
         Plot the average feature importance across all cutoffs and training groups.
-        
+
         Parameters:
         top_n (int): Number of top features to display (default: 15)
         """
         if not self.feature_importances:
-            print("No feature importances available. Make sure you've trained models first.")
+            print(
+                "No feature importances available. Make sure you've trained models first."
+            )
             return
-        
+
         # Initialize dictionaries to store cumulative importances and feature counts
         cumulative_importances = {}
         feature_counts = {}
-        
+
         # Sum up importances across all cutoffs and training groups
-        for (cutoff, training_group_val), importances in self.feature_importances.items():
+        for (
+            cutoff,
+            training_group_val,
+        ), importances in self.feature_importances.items():
             model_key = (cutoff, training_group_val)
-            
+
             # Check if the model exists for this (cutoff, training_group_val)
             if model_key not in self.models:
                 print(f"Model for {model_key} not found, skipping...")
                 continue
-                
+
             model = self.models[model_key]
-            
+
             for idx, importance in enumerate(importances):
                 # Get feature name and handle missing or misaligned feature indices
                 try:
                     feature = model.feature_name_[idx]
                 except IndexError:
-                    print(f"Feature index {idx} out of range for model {model_key}, skipping...")
+                    print(
+                        f"Feature index {idx} out of range for model {model_key}, skipping..."
+                    )
                     continue
-                
+
                 # Aggregate importance for this feature
                 if feature not in cumulative_importances:
                     cumulative_importances[feature] = 0
                     feature_counts[feature] = 0
-                
+
                 cumulative_importances[feature] += importance
                 feature_counts[feature] += 1
-        
+
         # Calculate average importances
-        avg_importances = {feature: imp / feature_counts[feature]
-                        for feature, imp in cumulative_importances.items()}
-        
+        avg_importances = {
+            feature: imp / feature_counts[feature]
+            for feature, imp in cumulative_importances.items()
+        }
+
         # Sort features by importance and limit to top_n
-        sorted_features = sorted(avg_importances.items(), key=lambda x: x[1], reverse=True)
+        sorted_features = sorted(
+            avg_importances.items(), key=lambda x: x[1], reverse=True
+        )
         sorted_features = sorted_features[:top_n]  # Limit to top_n features
-        
+
         features = [item[0] for item in sorted_features]
         importances = [item[1] for item in sorted_features]
-        
+
         # Plot
         plt.figure(figsize=(12, 8))
-        plt.barh(features, importances, color='steelblue')
-        plt.xlabel('Average Importance', fontsize=14)
-        plt.ylabel('Features', fontsize=14)
-        
+        plt.barh(features, importances, color="steelblue")
+        plt.xlabel("Average Importance", fontsize=14)
+        plt.ylabel("Features", fontsize=14)
+
         # Update title to reflect the number of features shown
         total_features = len(avg_importances)
         if total_features > top_n:
-            plt.title(f'Top {top_n} Features by Average Importance (out of {total_features} total)', fontsize=16)
+            plt.title(
+                f"Top {top_n} Features by Average Importance (out of {total_features} total)",
+                fontsize=16,
+            )
         else:
-            plt.title('Average Feature Importance Across Cutoffs and Training Groups', fontsize=16)
-        
+            plt.title(
+                "Average Feature Importance Across Cutoffs and Training Groups",
+                fontsize=16,
+            )
+
         plt.gca().invert_yaxis()
         plt.tight_layout()
         plt.show()
