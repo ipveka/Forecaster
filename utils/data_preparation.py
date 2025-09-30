@@ -1,21 +1,19 @@
-# General libraries
+# Standard library imports
 import gc
 import os
-# Warnings
 import warnings
-# Other libraries
 from itertools import product
-# Utilities
 from pathlib import Path
 
-# Plots
+# Third-party imports
 import matplotlib.pyplot as plt
 import numpy as np
 import pandas as pd
 import psutil
+
+# ML library imports
 from lightgbm import LGBMRegressor
 from sklearn.linear_model import LinearRegression
-# ML
 from sklearn.preprocessing import LabelEncoder
 
 warnings.filterwarnings("ignore", category=DeprecationWarning)
@@ -63,16 +61,35 @@ class DataPreparation:
         Returns:
         pd.DataFrame: Prepared DataFrame
         """
-        # Start function
-        print("Starting data preparation...")
+        # Print header
+        print("\n" + "=" * 70)
+        print("DATA PREPARATION")
+        print("=" * 70)
+        
+        # Log initial dataset info
+        initial_rows = len(df)
+        initial_cols = len(df.columns)
+        n_groups = df[group_cols].drop_duplicates().shape[0] if isinstance(group_cols, list) else df[group_cols].nunique()
+        print(f"\n📊 Input Dataset:")
+        print(f"   • Rows: {initial_rows:,}")
+        print(f"   • Columns: {initial_cols}")
+        print(f"   • Groups: {n_groups:,}")
+        print(f"   • Date column: '{date_col}'")
+        print(f"   • Target: '{target}'")
 
         # Convert date column to datetime once at the beginning
+        print(f"\n🔄 Converting '{date_col}' to datetime format...")
         df[date_col] = pd.to_datetime(df[date_col])
+        date_range = f"{df[date_col].min().date()} to {df[date_col].max().date()}"
+        print(f"   ✓ Date range: {date_range}")
 
         # Auto-detect frequency if not provided
         if freq is None:
+            print(f"\n🔍 Auto-detecting frequency...")
             freq = self.detect_frequency(df, date_col)
-            print(f"Auto-detected frequency: {freq}")
+            print(f"   ✓ Detected frequency: {freq}")
+        else:
+            print(f"\n📅 Using specified frequency: {freq}")
 
         # Get frequency-specific parameters
         from utils.forecaster_utils import get_frequency_params
@@ -82,45 +99,90 @@ class DataPreparation:
         # Use frequency-specific parameters if not provided by user
         if horizon is None:
             horizon = freq_params["horizon"]
-            print(f"Using frequency-based horizon: {horizon}")
+            print(f"   ✓ Using frequency-based horizon: {horizon} periods")
+        else:
+            print(f"   ✓ Using specified horizon: {horizon} periods")
 
         if dp_window_size is None:
             dp_window_size = freq_params["dp_window_size"]
-            print(f"Using frequency-based window size for smoothing: {dp_window_size}")
+            print(f"   ✓ Using frequency-based smoothing window: {dp_window_size} periods")
+        else:
+            print(f"   ✓ Using specified smoothing window: {dp_window_size} periods")
 
         # Complete logic
         if complete_dataframe:
+            print(f"\n🔧 Filling missing dates for each group...")
+            rows_before = len(df)
             df = self.complete(df, group_cols, date_col, freq)
-            print("Completed DataFrame by filling in missing values.")
+            rows_after = len(df)
+            rows_added = rows_after - rows_before
+            print(f"   ✓ Added {rows_added:,} rows to complete date ranges")
+            print(f"   ✓ Total rows: {rows_after:,}")
+        else:
+            print(f"\n⏭️  Skipping date completion (complete_dataframe=False)")
 
         # Find all numeric columns to be treated as signals
         signal_cols = [col for col in df.select_dtypes(include=["float64"]).columns]
-        print(f"Identified signal columns: {signal_cols}")
+        print(f"\n📈 Identified {len(signal_cols)} signal column(s):")
+        for col in signal_cols:
+            non_null_pct = (df[col].notna().sum() / len(df)) * 100
+            print(f"   • {col} ({non_null_pct:.1f}% non-null)")
 
         # Smoothing of signals
-        if smoothing:
+        if smoothing and signal_cols:
+            print(f"\n🔄 Applying smoothing to {len(signal_cols)} signal(s)...")
             df = self.smoothing(df, group_cols, date_col, signal_cols, dp_window_size)
-            print(
-                f"Applied smoothing with a moving average window size of {dp_window_size}."
-            )
+            print(f"   ✓ Applied moving average with window size: {dp_window_size}")
+            print(f"   ✓ Created 'filled_*' columns for each signal")
+        elif not smoothing:
+            print(f"\n⏭️  Skipping smoothing (smoothing=False)")
+        else:
+            print(f"\n⚠️  No signal columns found for smoothing")
 
         # Get last cutoffs
+        print(f"\n📅 Creating {n_cutoffs} cutoff(s) for backtesting...")
         cutoff_dates = self.get_first_dates_last_n_months(df, date_col, n_cutoffs)
-        print(f"Identified cutoff dates for backtesting: {cutoff_dates}")
+        print(f"   ✓ Cutoff dates:")
+        for i, cutoff_date in enumerate(cutoff_dates, 1):
+            print(f"      {i}. {pd.to_datetime(cutoff_date).date()}")
 
         # Create backtesting
+        print(f"\n🔀 Creating train/test splits...")
+        rows_before = len(df)
         df = self.create_backtesting_df(df, date_col, cutoff_dates)
-        print("Created backtesting DataFrame.")
+        rows_after = len(df)
+        print(f"   ✓ Expanded dataset from {rows_before:,} to {rows_after:,} rows")
+        train_rows = (df["sample"] == "train").sum()
+        test_rows = (df["sample"] == "test").sum()
+        print(f"   ✓ Train samples: {train_rows:,} ({train_rows/rows_after*100:.1f}%)")
+        print(f"   ✓ Test samples: {test_rows:,} ({test_rows/rows_after*100:.1f}%)")
 
         # Add horizon for last cutoff
+        print(f"\n🎯 Adding forecast horizon for latest cutoff...")
+        rows_before = len(df)
         df = self.add_horizon_last_cutoff(df, group_cols, date_col, horizon, freq)
-        print("Added forecasting horizon for the last cutoff.")
+        rows_after = len(df)
+        rows_added = rows_after - rows_before
+        if rows_added > 0:
+            print(f"   ✓ Added {rows_added:,} rows for {horizon}-period forecast horizon")
+        else:
+            print(f"   ✓ Horizon already complete (no rows added)")
 
         # Final formatting
+        print(f"\n🔧 Final formatting...")
         df["cutoff"] = pd.to_datetime(df["cutoff"])
+        print(f"   ✓ Converted cutoff column to datetime")
 
-        # Final message and return
-        print("Data preparation completed.")
+        # Final summary
+        print(f"\n" + "=" * 70)
+        print(f"✅ DATA PREPARATION COMPLETED")
+        print(f"=" * 70)
+        print(f"   • Final shape: {df.shape[0]:,} rows × {df.shape[1]} columns")
+        print(f"   • Cutoffs: {n_cutoffs}")
+        print(f"   • Horizon: {horizon} periods")
+        print(f"   • Frequency: {freq}")
+        print("=" * 70 + "\n")
+        
         return df
 
     # Detect frequency

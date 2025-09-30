@@ -1,105 +1,58 @@
-# General libraries
+# Standard library imports
 import gc
 import multiprocessing
 import os
 import warnings
-# Multiprocessing
 from concurrent.futures import ProcessPoolExecutor
 from functools import partial
 from math import ceil
 from time import sleep
 
-import lightgbm
+# Third-party imports
 import matplotlib.dates as mdates
-# Plots
 import matplotlib.pyplot as plt
 import numpy as np
 import pandas as pd
-# Cuda
 import torch
 from IPython import display
-# Models
-from lightgbm import LGBMRegressor
-# Plots
 from matplotlib import pyplot as plt
-from sklearn.ensemble import (AdaBoostRegressor, GradientBoostingRegressor,
-                              RandomForestRegressor)
+from matplotlib.patches import Rectangle
+
+# ML library imports
+import lightgbm
+from lightgbm import LGBMRegressor
+from sklearn.ensemble import (
+    AdaBoostRegressor,
+    GradientBoostingRegressor,
+    RandomForestRegressor,
+)
 from sklearn.experimental import enable_halving_search_cv
 from sklearn.feature_selection import mutual_info_regression
 from sklearn.linear_model import LinearRegression
 from sklearn.metrics import mean_squared_error
-from sklearn.model_selection import (GridSearchCV, HalvingRandomSearchCV,
-                                     RandomizedSearchCV, TimeSeriesSplit,
-                                     train_test_split)
-# Sklearn
+from sklearn.model_selection import (
+    GridSearchCV,
+    HalvingRandomSearchCV,
+    RandomizedSearchCV,
+    TimeSeriesSplit,
+    train_test_split,
+)
 from sklearn.preprocessing import LabelEncoder, MinMaxScaler
-# Statsmodels
 from statsmodels.tsa.seasonal import seasonal_decompose
+
+# Local imports
+from utils.parameters import (
+    create_param_heuristics,
+    estimator_map,
+    hyperparam_dictionary,
+    tune_hyperparameters,
+)
 
 # Options
 warnings.filterwarnings("ignore", category=DeprecationWarning)
 warnings.filterwarnings("ignore", category=UserWarning)
 warnings.simplefilter(action="ignore", category=pd.errors.PerformanceWarning)
 pd.options.mode.chained_assignment = None
-
-# Define estimator map
-estimator_map = {
-    "LGBM": LGBMRegressor(
-        n_jobs=-1, objective="regression", random_state=42, verbose=-1
-    ),
-    "RF": RandomForestRegressor(random_state=42, verbose=-1),
-    "GBM": GradientBoostingRegressor(random_state=42, verbose=-1),
-    "ADA": AdaBoostRegressor(random_state=42),
-    "LR": LinearRegression(),
-}
-
-# Define parameter dictionary
-hyperparam_dictionary = {
-    "LGBM": {
-        "learning_rate": [0.01, 0.05, 0.1],
-        "n_estimators": [500, 1000, 2000],
-        "num_leaves": [15, 31, 64],
-        "max_depth": [4, 8, 12],
-        "subsample": [0.6, 0.8, 1.0],
-        "colsample_bytree": [0.6, 0.8, 1.0],
-        "reg_alpha": [0.0, 0.1, 0.5],
-        "reg_lambda": [0.0, 0.1, 0.5],
-    },
-    "RF": {
-        "n_estimators": [100, 500, 1000, 1500],
-        "max_depth": [8, 16, 32, 64, None],
-        "min_samples_split": [2, 5, 10],
-        "min_samples_leaf": [1, 2, 4],
-        "max_features": ["sqrt", "log2", None],
-        "criterion": ["squared_error", "absolute_error"],
-        "bootstrap": [True, False],
-        "max_samples": [0.5, 0.7, 0.9],
-    },
-    "GBM": {
-        "n_estimators": [100, 300, 500, 1000],
-        "learning_rate": [0.01, 0.05, 0.1, 0.2],
-        "max_depth": [3, 4, 6, 8],
-        "min_samples_split": [2, 5, 10],
-        "min_samples_leaf": [1, 2, 4],
-        "subsample": [0.6, 0.8, 1.0],
-        "max_features": ["sqrt", "log2", None],
-        "validation_fraction": [0.1, 0.2],
-    },
-    "ADA": {
-        "n_estimators": [50, 100, 200, 500],
-        "learning_rate": [0.01, 0.05, 0.1, 0.3],
-        "algorithm": ["SAMME", "SAMME.R"],
-        "random_state": [42],
-    },
-    "LR": {
-        "alpha": [0.001, 0.01, 0.1, 1.0, 10, 100, 500],
-        "fit_intercept": [True, False],
-        "solver": ["svd", "cholesky", "lsqr", "sag"],
-        "max_iter": [1000],
-        "normalize": [True, False],
-        "tol": [1e-4, 1e-3],
-    },
-}
 
 
 # Forecaster class
@@ -117,256 +70,6 @@ class Forecaster:
         self.feature_importances = {}
         self.best_hyperparams = {}
         self.heuristic_params = {}
-
-    # Param heuristics
-    def create_param_heuristics(self, X_train, model_type="LGBM"):
-        """
-        Create heuristic-based hyperparameters based on dataset characteristics.
-
-        Parameters:
-        X_train (pd.DataFrame): Training features
-        model_type (str): Type of model ('LGBM', 'RF', 'GBM', 'ADA', 'LR')
-
-        Returns:
-        model: Configured model with heuristic hyperparameters
-        """
-        # Get dataset characteristics
-        n_samples = X_train.shape[0]
-        n_features = X_train.shape[1]
-
-        # Store characteristics for logging
-        dataset_info = {"n_samples": n_samples, "n_features": n_features}
-
-        # Create heuristic parameters based on model type
-        if model_type == "LGBM":
-            # LightGBM heuristics
-            # 1. n_estimators: More data/features -> more trees needed
-            if n_samples < 1000:
-                n_estimators = 100
-            elif n_samples < 10000:
-                n_estimators = 500
-            elif n_samples < 100000:
-                n_estimators = 1000
-            else:
-                n_estimators = 1500
-
-            # 2. learning_rate: Adjust based on n_estimators
-            if n_estimators <= 100:
-                learning_rate = 0.1
-            elif n_estimators <= 500:
-                learning_rate = 0.05
-            else:
-                learning_rate = 0.01
-
-            # 3. max_depth: Adjust based on n_features
-            if n_features < 10:
-                max_depth = 5
-            elif n_features < 50:
-                max_depth = 7
-            elif n_features < 100:
-                max_depth = 9
-            else:
-                max_depth = 12
-
-            # 4. num_leaves: Related to max_depth but with some constraints
-            # Rule of thumb: num_leaves = 2^(max_depth) but capped for better generalization
-            num_leaves = min(2**max_depth, 127)  # Cap at 127 to prevent overfitting
-
-            # 5. min_data_in_leaf: More data -> can afford larger min_data_in_leaf
-            if n_samples < 1000:
-                min_data_in_leaf = 5
-            elif n_samples < 10000:
-                min_data_in_leaf = 10
-            elif n_samples < 100000:
-                min_data_in_leaf = 20
-            else:
-                min_data_in_leaf = 50
-
-            # 6. feature_fraction: More features -> lower feature_fraction to prevent overfitting
-            if n_features < 10:
-                feature_fraction = 1.0
-            elif n_features < 50:
-                feature_fraction = 0.9
-            elif n_features < 100:
-                feature_fraction = 0.8
-            else:
-                feature_fraction = 0.7
-
-            # 7. bagging_fraction: Similar logic to feature_fraction
-            if n_samples < 1000:
-                bagging_fraction = 1.0
-            elif n_samples < 10000:
-                bagging_fraction = 0.9
-            elif n_samples < 100000:
-                bagging_fraction = 0.8
-            else:
-                bagging_fraction = 0.7
-
-            # 8. Regularization: More features -> stronger regularization
-            if n_features < 20:
-                reg_alpha = 0.0
-                reg_lambda = 0.0
-            elif n_features < 50:
-                reg_alpha = 0.01
-                reg_lambda = 0.01
-            elif n_features < 100:
-                reg_alpha = 0.03
-                reg_lambda = 0.05
-            else:
-                reg_alpha = 0.05
-                reg_lambda = 0.1
-
-            # Create model with heuristic parameters
-            model = LGBMRegressor(
-                n_estimators=n_estimators,
-                learning_rate=learning_rate,
-                max_depth=max_depth,
-                num_leaves=num_leaves,
-                min_child_samples=min_data_in_leaf,
-                colsample_bytree=feature_fraction,
-                subsample=bagging_fraction,
-                reg_alpha=reg_alpha,
-                reg_lambda=reg_lambda,
-                n_jobs=-1,
-                objective="regression",
-                random_state=42,
-                verbose=-1,
-            )
-
-            # Store parameters for logging
-            self.heuristic_params[model_type] = {
-                "n_estimators": n_estimators,
-                "learning_rate": learning_rate,
-                "max_depth": max_depth,
-                "num_leaves": num_leaves,
-                "min_child_samples": min_data_in_leaf,
-                "colsample_bytree": feature_fraction,
-                "subsample": bagging_fraction,
-                "reg_alpha": reg_alpha,
-                "reg_lambda": reg_lambda,
-                "dataset_info": dataset_info,
-            }
-
-        elif model_type == "RF":
-            # Random Forest heuristics
-            # Adjust n_estimators based on dataset size
-            if n_samples < 1000:
-                n_estimators = 100
-            elif n_samples < 10000:
-                n_estimators = 200
-            else:
-                n_estimators = 500
-
-            # Adjust max_depth based on n_features
-            if n_features < 10:
-                max_depth = 10
-            elif n_features < 50:
-                max_depth = 20
-            else:
-                max_depth = 30
-
-            # Adjust min_samples_split and min_samples_leaf based on dataset size
-            if n_samples < 1000:
-                min_samples_split = 2
-                min_samples_leaf = 1
-            elif n_samples < 10000:
-                min_samples_split = 5
-                min_samples_leaf = 2
-            else:
-                min_samples_split = 10
-                min_samples_leaf = 4
-
-            # Create model with heuristic parameters
-            model = RandomForestRegressor(
-                n_estimators=n_estimators,
-                max_depth=max_depth,
-                min_samples_split=min_samples_split,
-                min_samples_leaf=min_samples_leaf,
-                n_jobs=-1,
-                random_state=42,
-                verbose=-1,
-            )
-
-            # Store parameters for logging
-            self.heuristic_params[model_type] = {
-                "n_estimators": n_estimators,
-                "max_depth": max_depth,
-                "min_samples_split": min_samples_split,
-                "min_samples_leaf": min_samples_leaf,
-                "dataset_info": dataset_info,
-            }
-
-        elif model_type == "GBM":
-            # Gradient Boosting heuristics
-            # Adjust n_estimators based on dataset size
-            if n_samples < 1000:
-                n_estimators = 100
-                learning_rate = 0.1
-            elif n_samples < 10000:
-                n_estimators = 200
-                learning_rate = 0.05
-            else:
-                n_estimators = 500
-                learning_rate = 0.02
-
-            # Adjust max_depth based on n_features
-            if n_features < 10:
-                max_depth = 3
-            elif n_features < 50:
-                max_depth = 4
-            else:
-                max_depth = 5
-
-            # Create model with heuristic parameters
-            model = GradientBoostingRegressor(
-                n_estimators=n_estimators,
-                learning_rate=learning_rate,
-                max_depth=max_depth,
-                random_state=42,
-                verbose=-1,
-            )
-
-            # Store parameters for logging
-            self.heuristic_params[model_type] = {
-                "n_estimators": n_estimators,
-                "learning_rate": learning_rate,
-                "max_depth": max_depth,
-                "dataset_info": dataset_info,
-            }
-
-        elif model_type == "ADA":
-            # AdaBoost heuristics
-            # Adjust n_estimators based on dataset size
-            if n_samples < 1000:
-                n_estimators = 50
-                learning_rate = 1.0
-            elif n_samples < 10000:
-                n_estimators = 100
-                learning_rate = 0.5
-            else:
-                n_estimators = 200
-                learning_rate = 0.3
-
-            # Create model with heuristic parameters
-            model = AdaBoostRegressor(
-                n_estimators=n_estimators, learning_rate=learning_rate, random_state=42
-            )
-
-            # Store parameters for logging
-            self.heuristic_params[model_type] = {
-                "n_estimators": n_estimators,
-                "learning_rate": learning_rate,
-                "dataset_info": dataset_info,
-            }
-
-        else:  # Linear Regression or other models
-            # For Linear Regression, no hyperparameters to tune
-            model = LinearRegression()
-
-            # Store parameters for logging
-            self.heuristic_params[model_type] = {"dataset_info": dataset_info}
-
-        return model
 
     # Remove outliers
     def remove_outliers(
@@ -618,120 +321,6 @@ class Forecaster:
                 ]
             return []
 
-    # Tune hyperparameters
-    def _tune_hyperparameters(
-        self,
-        X_train,
-        y_train,
-        model="LGBM",
-        params=None,
-        param_distributions=None,
-        search_method="halving",
-        n_splits=4,
-        scoring="neg_root_mean_squared_error",
-        n_iter=30,
-        sample_weight=None,
-    ):
-        """
-        Tune hyperparameters using the specified search method.
-        """
-        # Set up cross-validation
-        tscv = TimeSeriesSplit(n_splits=n_splits)
-
-        # Select the estimator and parameter distribution
-        base_model = params[model]
-        param_dist = param_distributions[model]
-
-        # Print the selected base model and parameter distribution
-        print("Selected Base Model:", base_model)
-        print("Parameter Distribution:", param_dist)
-
-        # Choose the search method
-        if search_method == "grid":
-            search = GridSearchCV(
-                estimator=base_model,
-                param_grid=param_dist,
-                cv=tscv,
-                scoring=scoring,
-                error_score="raise",
-                n_jobs=-1,
-                verbose=1,
-            )
-        elif search_method == "random":
-            search = RandomizedSearchCV(
-                estimator=base_model,
-                param_distributions=param_dist,
-                n_iter=n_iter,
-                cv=tscv,
-                scoring=scoring,
-                error_score="raise",
-                n_jobs=-1,
-                verbose=1,
-                random_state=42,
-            )
-        elif search_method == "halving":
-            search = HalvingRandomSearchCV(
-                estimator=base_model,
-                param_distributions=param_dist,
-                max_resources=3000,
-                aggressive_elimination=False,
-                return_train_score=False,
-                refit=True,
-                cv=tscv,
-                factor=3,
-                scoring=scoring,
-                error_score="raise",
-                n_jobs=-1,
-                verbose=1,
-                random_state=42,
-            )
-        else:
-            raise ValueError(
-                "Invalid search_method. Choose 'grid', 'random', or 'halving'."
-            )
-
-        # Perform the search, including sample weights if provided
-        if sample_weight is not None:
-            search.fit(X_train, y_train, sample_weight=sample_weight)
-        else:
-            search.fit(X_train, y_train)
-
-        return search.best_estimator_, search.best_params_
-
-    # Count and report NA
-    def calculate_nan_inf_percentage(self, X, y):
-        # Total number of rows
-        total_rows_X = X.shape[0]
-        total_rows_y = y.shape[0]
-
-        # Check for NaNs
-        nan_rows_X = np.isnan(X).any(axis=1)
-        nan_rows_y = np.isnan(y)
-        nan_count_X = np.sum(nan_rows_X)
-        nan_count_y = np.sum(nan_rows_y)
-
-        # Check for infinite values
-        inf_rows_X = np.isinf(X).any(axis=1)
-        inf_rows_y = np.isinf(y)
-        inf_count_X = np.sum(inf_rows_X)
-        inf_count_y = np.sum(inf_rows_y)
-
-        # Calculate percentages
-        nan_percentage_X = (nan_count_X / total_rows_X) * 100
-        nan_percentage_y = (nan_count_y / total_rows_y) * 100
-        inf_percentage_X = (inf_count_X / total_rows_X) * 100
-        inf_percentage_y = (inf_count_y / total_rows_y) * 100
-
-        # Print results
-        print(f"NaNs in X_train: {nan_percentage_X:.2f}% of rows contain NaNs")
-        print(f"NaNs in y_train: {nan_percentage_y:.2f}% of rows contain NaNs")
-        print(
-            f"Infinite values in X_train: {inf_percentage_X:.2f}% of rows contain infinite values"
-        )
-        print(
-            f"Infinite values in y_train: {inf_percentage_y:.2f}% of rows contain infinite values"
-        )
-
     # Train model
     def train_model(
         self,
@@ -758,9 +347,6 @@ class Forecaster:
             df, features, target_col
         )
 
-        # Report NA and Infs
-        # self.calculate_nan_inf_percentage(X_train, y_train)
-
         # Fill NA in y
         y_train = y_train.fillna(0)
 
@@ -772,11 +358,11 @@ class Forecaster:
 
         # Perform hyperparameter tuning if enabled
         if tune_hyperparameters:
-            print(
-                f"Tuning hyperparameters for cutoff: {cutoff}, training group: {training_group_val} ({training_group})"
-            )
+            print(f"   ⚙️  Tuning hyperparameters...")
+            print(f"      - Method: {search_method}")
+            print(f"      - Scoring: {scoring}")
             # Tune hyperparams
-            model, best_params = self._tune_hyperparameters(
+            model, best_params = tune_hyperparameters(
                 X_train,
                 y_train,
                 model=model,
@@ -791,21 +377,25 @@ class Forecaster:
             self.best_hyperparams[(cutoff, training_group_val)] = best_params
         else:
             # Use heuristic parameters based on dataset characteristics
-            print(
-                f"Using heuristic parameters for cutoff: {cutoff}, training group: {training_group_val} ({training_group})"
-            )
-            model = self.create_param_heuristics(X_train, model_type=model)
+            print(f"   ⚙️  Using heuristic parameters (auto-configured)")
+            model, heuristic_params = create_param_heuristics(X_train, model_type=model)
 
-            # Log the heuristic parameters used
-            print(f"Heuristic parameters for {model}:")
-            for param, value in self.heuristic_params.get(model, {}).items():
-                if param != "dataset_info":
-                    print(f"  • {param}: {value}")
+            # Store heuristic parameters
+            self.heuristic_params[model] = heuristic_params
+
+            # Log the heuristic parameters used (compact format)
+            dataset_info = heuristic_params.get("dataset_info", {})
+            print(f"      - Samples: {dataset_info.get('n_samples', 'N/A'):,}")
+            print(f"      - Features: {dataset_info.get('n_features', 'N/A')}")
+            
+            # Show key parameters only
+            key_params = ['n_estimators', 'learning_rate', 'max_depth']
+            for param in key_params:
+                if param in heuristic_params:
+                    print(f"      - {param}: {heuristic_params[param]}")
 
             # Also store in best_hyperparams for consistency
-            self.best_hyperparams[(cutoff, training_group_val)] = (
-                self.heuristic_params.get(model, {})
-            )
+            self.best_hyperparams[(cutoff, training_group_val)] = heuristic_params
 
         # Fit the model with or without sample weights
         model.fit(X_train, y_train, sample_weight=train_weights)
@@ -859,10 +449,11 @@ class Forecaster:
         try:
             # Calculate and display cutoff progress percentage
             cutoff_progress = (current_cutoff_idx + 1) / total_cutoffs * 100
-            print(
-                f"\nProcessing cutoff {current_cutoff_idx + 1}/{total_cutoffs} ({cutoff_progress:.2f}%) - Cutoff: {cutoff}"
-            )
-            print("----------------------------------------------------------")
+            print(f"\n" + "=" * 70)
+            print(f"📅 CUTOFF {current_cutoff_idx + 1}/{total_cutoffs} ({cutoff_progress:.1f}%)")
+            print(f"=" * 70)
+            print(f"   • Date: {pd.to_datetime(cutoff).date()}")
+            print(f"   • Training groups: {len(training_group_values)}")
 
             # Create empty object for results
             results_cutoff = []
@@ -872,9 +463,9 @@ class Forecaster:
 
             # Perform feature selection for this cutoff if requested, using only training data
             if best_features:
-                print(
-                    f"Selecting {n_best_features} best numeric features for cutoff {cutoff} using mutual information"
-                )
+                print(f"\n🎯 Feature Selection:")
+                print(f"   • Method: Mutual Information")
+                print(f"   • Target features: {n_best_features}")
 
                 # Filter scope for train data
                 train_data = cutoff_df[cutoff_df["sample"] == "train"]
@@ -907,7 +498,7 @@ class Forecaster:
                     raise
 
                 # Show number of features before selection
-                print(f"Total number of features before selection: {len(features)}")
+                print(f"   • Features before: {len(features)}")
 
                 # Run selection function on numeric features only
                 try:
@@ -922,24 +513,25 @@ class Forecaster:
                 selected_features = selected_numeric_features + non_numeric_features
 
                 # Show number of features after selection
-                print(
-                    f"Total number of features after selection: {len(selected_features)}"
-                )
+                print(f"   • Features after: {len(selected_features)}")
+                print(f"   ✓ Feature selection completed")
 
                 # Assign new features
                 features_to_use = selected_features
             else:
                 # No feature selection
-                print(f"No feature selection: Using all features provided")
+                print(f"\n🎯 Feature Selection: Disabled")
+                print(f"   • Using all {len(features)} features provided")
                 features_to_use = features
 
             # Iterate over training groups and track progress
             total_training_groups = len(training_group_values)
             for idx, training_group_val in enumerate(training_group_values):
                 group_progress = (idx + 1) / total_training_groups * 100
-                print(
-                    f"Training and predicting for cutoff: {cutoff}, training group: {training_group_val} ({group_progress:.2f}% of groups in cutoff)"
-                )
+                print(f"\n" + "-" * 70)
+                print(f"🤖 Training Group {idx + 1}/{total_training_groups} ({group_progress:.1f}%)")
+                print(f"   • Group ID: {training_group_val}")
+                print(f"   • Model: {model}")
 
                 # Filter scope
                 cutoff_df_tg = cutoff_df[
@@ -972,9 +564,7 @@ class Forecaster:
 
                 # Apply guardrail if specified
                 if group_cols and baseline_col and use_guardrail:
-                    print(
-                        f"Calculating guardrail for cutoff: {cutoff}, training group: {training_group_val}"
-                    )
+                    print(f"\n🛡️  Applying guardrail constraints...")
 
                     # Scope for guardrail
                     test_data = cutoff_df_results[cutoff_df_results["sample"] == "test"]
@@ -989,9 +579,11 @@ class Forecaster:
                             adjusted_data = self.calculate_guardrail(
                                 test_data, group_cols, baseline_col, guardrail_limit
                             )
-                            cutoff_df_results.loc[
-                                cutoff_df_results.index, "prediction"
-                            ] = adjusted_data["prediction"]
+                            # Update predictions with guardrail-adjusted values
+                            test_indices = cutoff_df_results[cutoff_df_results["sample"] == "test"].index
+                            cutoff_df_results.loc[test_indices, "model_prediction"] = adjusted_data["model_prediction"].values
+                            cutoff_df_results.loc[test_indices, "prediction"] = adjusted_data["prediction"].values
+                            cutoff_df_results.loc[test_indices, "guardrail"] = adjusted_data["guardrail"].values
                         except Exception as e:
                             print(
                                 f"Error occurred while calculating guardrail for cutoff {cutoff}, training group {training_group_val}: {str(e)}"
@@ -1045,8 +637,11 @@ class Forecaster:
         """
         Train and predict for all cutoff values and training groups in the dataset.
         """
-        # Print init
-        print("Starting backtesting")
+        # Print header
+        print("\n" + "=" * 70)
+        print("MODEL TRAINING & BACKTESTING")
+        print("=" * 70)
+        
         try:
             # Validate input
             if features is None:
@@ -1060,21 +655,31 @@ class Forecaster:
                     "group_cols cannot be None. Specify the columns used for grouping."
                 )
 
+            # Log initial dataset info
+            initial_rows = len(self.df)
+            n_features = len(features)
+            print(f"\n📊 Input Dataset:")
+            print(f"   • Rows: {initial_rows:,}")
+            print(f"   • Features: {n_features}")
+            print(f"   • Target: '{target_col}'")
+            print(f"   • Model: {model}")
+
             # Assign default parameters
             if params is None:
-                print(
-                    "User did not provide parameter dictionary, using internal method"
-                )
+                print(f"\n⚙️  Using default model parameters")
                 params = estimator_map
+            else:
+                print(f"\n⚙️  Using user-provided model parameters")
 
             if param_distributions is None:
-                print(
-                    "User did not provide hyperparameter dictionary, using internal method"
-                )
+                print(f"   • Using default hyperparameter search space")
                 param_distributions = hyperparam_dictionary
+            else:
+                print(f"   • Using user-provided hyperparameter search space")
 
             # Remove outliers if specified
             if remove_outliers and outlier_column and group_cols:
+                print(f"\n🔍 Removing outliers from '{outlier_column}'...")
                 try:
                     new_group_cols = group_cols + ["cutoff"]
                     self.remove_outliers(
@@ -1084,62 +689,101 @@ class Forecaster:
                         upper_quantile=upper_quantile,
                         ts_decomposition=ts_decomposition,
                     )
+                    print(f"   ✓ Outliers removed (quantiles: {lower_quantile}-{upper_quantile})")
                 except Exception as e:
-                    print(f"Error occurred while removing outliers: {str(e)}")
+                    print(f"   ✗ Error occurred while removing outliers: {str(e)}")
                     raise
+            else:
+                print(f"\n⏭️  Skipping outlier removal")
 
             # Get unique cutoffs and training group values
             cutoffs = self.df["cutoff"].unique()
-            print("Number of cutoffs detected: ", len(cutoffs))
-            training_group_values = self.df[training_group].unique()
+            n_cutoffs = len(cutoffs)
+            print(f"\n📅 Backtesting Configuration:")
+            print(f"   • Number of cutoffs: {n_cutoffs}")
+            
+            # Display cutoff dates
+            if n_cutoffs <= 5:
+                for i, cutoff in enumerate(sorted(cutoffs), 1):
+                    print(f"      {i}. {pd.to_datetime(cutoff).date()}")
+            else:
+                sorted_cutoffs = sorted(cutoffs)
+                print(f"      First: {pd.to_datetime(sorted_cutoffs[0]).date()}")
+                print(f"      Last: {pd.to_datetime(sorted_cutoffs[-1]).date()}")
+
+            # Handle training group
+            if training_group is None or training_group not in self.df.columns:
+                print(f"   • Training groups: 1 (dummy group - all data together)")
+                self.df["training_group"] = 1
+                training_group = "training_group"
+                training_group_values = [1]
+            else:
+                training_group_values = self.df[training_group].unique()
+                # Ensure training group values are integers
+                try:
+                    training_group_values = sorted([int(val) for val in training_group_values])
+                    print(f"   • Training groups: {len(training_group_values)} ({training_group})")
+                except (ValueError, TypeError):
+                    raise ValueError(
+                        f"Training group values in column '{training_group}' must be convertible to integers."
+                    )
+
+            # Calculate total models to train
+            total_models = n_cutoffs * len(training_group_values)
+            print(f"   • Total models to train: {total_models}")
 
             # Check the number of cutoffs
             if len(cutoffs) == 0:
                 raise ValueError("No cutoff values found in the dataset.")
             elif len(cutoffs) == 1:
-                print(
-                    "Only one cutoff value found. Processing without parallelization."
-                )
+                print(f"\n⚠️  Only one cutoff found - processing sequentially")
                 use_parallel = False
 
-            # Ensure training group values are integers and sort them
-            try:
-                training_group_values = sorted(
-                    [int(val) for val in training_group_values]
-                )
-            except ValueError:
-                raise ValueError(
-                    f"Training group values in column '{training_group}' must be convertible to integers."
-                )
+            # Model configuration
+            print(f"\n🤖 Model Configuration:")
+            print(f"   • Algorithm: {model}")
+            print(f"   • Hyperparameter tuning: {tune_hyperparameters}")
+            if tune_hyperparameters:
+                print(f"      - Search method: {search_method}")
+                print(f"      - Scoring: {scoring}")
+                print(f"      - Iterations: {n_iter}")
+            print(f"   • Feature selection: {best_features is not None}")
+            if best_features is not None:
+                print(f"      - Best features: {n_best_features}")
+            print(f"   • Sample weights: {use_weights}")
+            print(f"   • Guardrails: {use_guardrail}")
+            if use_guardrail:
+                print(f"      - Limit: {guardrail_limit}x baseline")
 
-            # Check if CUDA is available
+            # Check if CUDA is available and get CPU count
+            print(f"\n💻 Compute Resources:")
             if torch.cuda.is_available():
-                print("CUDA is available: Using GPU")
+                print(f"   • GPU: Available (CUDA enabled)")
             else:
-                num_cpu = os.cpu_count()
-                print(
-                    f"CUDA is not available, using CPU with {num_cpu} available cores"
-                )
+                print(f"   • GPU: Not available (using CPU only)")
+
+            # Get the number of available CPU cores
+            available_cpus = os.cpu_count()
+            print(f"   • Available CPU cores: {available_cpus}")
 
             # Set the number of CPUs to use
             if num_cpus is None:
-                num_cpu = os.cpu_count()
-                num_cpus = num_cpu // 2
-                print(f"Using {num_cpus} CPUs for parallel computing")
+                # Default to half the available cores if not specified
+                num_cpus = max(1, available_cpus // 2)
+                print(f"   • Using: {num_cpus} cores (default: 50%)")
             else:
-                num_cpus = num_cpu
+                # Ensure we don't exceed available cores
+                num_cpus = min(num_cpus, available_cpus)
+                print(f"   • Using: {num_cpus} cores (user-specified)")
 
             # Default guardrail
             if use_guardrail:
                 self.df["guardrail"] = False
 
-            # Show selected model
-            print("Predictions will be generated with model:", model)
-
             # Use ProcessPoolExecutor to parallelize by cutoff if specified
             if use_parallel:
-                print(f"Running predictions in parallel with {num_cpus} cores")
-                print("----------------------------------------------------------")
+                print(f"\n🚀 Running predictions in PARALLEL mode")
+                print("=" * 70)
                 try:
                     with ProcessPoolExecutor(max_workers=num_cpus) as executor:
                         args_list = [
@@ -1172,11 +816,11 @@ class Forecaster:
                             executor.map(self.process_cutoff_wrapper, args_list)
                         )
                 except Exception as e:
-                    print(f"Error occurred during parallel processing: {str(e)}")
+                    print(f"\n❌ Error during parallel processing: {str(e)}")
                     raise
             else:
-                print(f"Running predictions sequentially")
-                print("----------------------------------------------------------")
+                print(f"\n🔄 Running predictions in SEQUENTIAL mode")
+                print("=" * 70)
                 results = [
                     self.process_cutoff(
                         c,
@@ -1205,145 +849,255 @@ class Forecaster:
                 ]
 
             # Combine results
+            print(f"\n🔗 Combining results from all cutoffs...")
             if len(cutoffs) == 1:
                 self.df = results[0]
             else:
                 self.df = pd.concat(results, axis=0, ignore_index=True)
 
-            # Completion message
-            print("----------------------------------------------------------")
-            print("Predictions completed for all cutoffs and training groups")
+            # Reset index
+            self.df = self.df.reset_index(drop=True)
+
+            # Calculate predictions statistics
+            n_predictions = (self.df["sample"] == "test").sum()
+            n_train = (self.df["sample"] == "train").sum()
+            
+            # Final summary
+            print(f"\n" + "=" * 70)
+            print(f"✅ BACKTESTING COMPLETED")
+            print(f"=" * 70)
+            print(f"   • Models trained: {total_models}")
+            print(f"   • Training samples: {n_train:,}")
+            print(f"   • Predictions generated: {n_predictions:,}")
+            print(f"   • Final dataset shape: {self.df.shape[0]:,} rows × {self.df.shape[1]} columns")
+            if hasattr(self, 'feature_importances') and self.feature_importances:
+                print(f"   • Feature importances: Available for {len(self.feature_importances)} models")
+            print("=" * 70 + "\n")
 
             return self.df
 
         except Exception as e:
-            print(f"An unexpected error occurred in run_predictions: {str(e)}")
+            print(f"\n❌ Error in run_backtesting: {str(e)}")
             raise
-
-    # Calculate guardrail
+    
+    # Calculate Guardrail
     def calculate_guardrail(self, data, group_cols, baseline_col, guardrail_limit=2.5):
         """
-        Calculate and apply guardrails to predictions, and add an indicator for guardrail application.
+        Apply a guardrail to model predictions to prevent extreme deviations from a baseline.
 
-        :param data: DataFrame containing the predictions and baseline values
-        :param group_cols: List of columns to group by for guardrail calculation
-        :param baseline_col: Column name for the baseline predictions
-        :param guardrail_limit: Limit for the guardrail adjustment (default: 3)
-        :return: DataFrame with adjusted predictions and guardrail indicator
+        For each group defined by `group_cols`, this function compares the sum of 
+        predictions with the sum of baseline values. If the predictions exceed the 
+        specified `guardrail_limit` multiplier of the baseline (too high or too low), 
+        predictions are proportionally scaled back to the guardrail limit.
+
+        Parameters
+        ----------
+        data : pd.DataFrame
+            DataFrame containing at least 'prediction' and the baseline column.
+        group_cols : list of str
+            Columns to group by when applying the guardrail.
+        baseline_col : str
+            Column name of the baseline values to compare against.
+        guardrail_limit : float, default 2.5
+            Maximum allowed ratio between prediction sum and baseline sum before adjustment.
+
+        Returns
+        -------
+        pd.DataFrame
+            DataFrame with:
+            - 'model_prediction': Original predictions from the model
+            - 'prediction': Guardrail-adjusted predictions
+            - 'guardrail': Boolean indicating whether guardrail was applied
         """
-        # Ensure non-negative values for prediction and baseline columns
+        # Work on a copy to avoid modifying original DataFrame
+        data = data.copy()
+
+        # Store original model predictions before any modifications
+        data["model_prediction"] = data["prediction"].copy()
+
+        # Ensure non-negative values for predictions and baseline
         data["prediction"] = data["prediction"].clip(lower=0)
         data[baseline_col] = data[baseline_col].clip(lower=0)
-
-        def adjust_group(group):
-            # Calculate sum of predictions and baseline
-            sum_prediction = group["prediction"].sum()
-            sum_baseline = group[baseline_col].sum()
-
-            # Apply guardrail if condition is met
-            if (
-                sum_prediction > guardrail_limit * sum_baseline
-                or sum_prediction < sum_baseline / guardrail_limit
-            ):
-                group["prediction"] = (group["prediction"] / 2) + (
-                    group[baseline_col] / 2
-                )
-                group["guardrail"] = True
-            else:
-                group["guardrail"] = False
-            return group
-
-        # Apply the adjustment to each group
-        adjusted_data = data.groupby(group_cols, group_keys=False).apply(adjust_group)
-        adjusted_data["guardrail"] = adjusted_data["guardrail"].astype(bool)
-
-        return adjusted_data
+        
+        # Replace NaN and inf values with 0
+        data["prediction"] = data["prediction"].replace([np.inf, -np.inf], 0).fillna(0)
+        data[baseline_col] = data[baseline_col].replace([np.inf, -np.inf], 0).fillna(0)
+        
+        # Calculate group-level statistics using transform for efficiency
+        group_sum_prediction = data.groupby(group_cols)["prediction"].transform("sum")
+        group_sum_baseline = data.groupby(group_cols)[baseline_col].transform("sum")
+        
+        # Calculate the ratio, handling division by zero
+        # If baseline is 0, set ratio to 1 (no adjustment needed)
+        ratio = np.where(
+            group_sum_baseline > 0,
+            group_sum_prediction / group_sum_baseline,
+            1.0
+        )
+        
+        # Determine if guardrail should be applied
+        # Guardrail triggers if ratio > guardrail_limit OR ratio < 1/guardrail_limit
+        upper_limit_exceeded = ratio > guardrail_limit
+        lower_limit_exceeded = ratio < (1.0 / guardrail_limit)
+        guardrail_triggered = upper_limit_exceeded | lower_limit_exceeded
+        
+        # Calculate scaling factor for adjustment
+        # If upper limit exceeded: scale down to guardrail_limit
+        # If lower limit exceeded: scale up to 1/guardrail_limit
+        # Otherwise: no scaling (factor = 1)
+        scaling_factor = np.where(
+            upper_limit_exceeded,
+            guardrail_limit / ratio,
+            np.where(
+                lower_limit_exceeded,
+                (1.0 / guardrail_limit) / ratio,
+                1.0
+            )
+        )
+        
+        # Apply proportional scaling to predictions
+        # This maintains the relative distribution of predictions within each group
+        data["prediction"] = data["prediction"] * scaling_factor
+        
+        # Add guardrail indicator column (True only where adjustment was actually applied)
+        data["guardrail"] = guardrail_triggered
+        
+        # Ensure the guardrail column is boolean
+        data["guardrail"] = data["guardrail"].astype(bool)
+        
+        # Log guardrail statistics with detailed information
+        if guardrail_triggered.any():
+            n_groups_adjusted = data[data["guardrail"]].groupby(group_cols).ngroups
+            total_groups = data.groupby(group_cols).ngroups
+            n_rows_adjusted = data["guardrail"].sum()
+            total_rows = len(data)
+            
+            print(f"   Guardrail applied:")
+            print(f"      - Groups affected: {n_groups_adjusted}/{total_groups}")
+            print(f"      - Rows adjusted: {n_rows_adjusted}/{total_rows}")
+            
+            # Show adjustment statistics
+            adjustment_pct = ((data.loc[data["guardrail"], "prediction"] / 
+                              data.loc[data["guardrail"], "model_prediction"]) - 1) * 100
+            avg_adjustment = adjustment_pct.mean()
+            print(f"      - Average adjustment: {avg_adjustment:+.1f}%")
+        
+        return data
 
     # Plot feature importance
-    def plot_feature_importance(self, top_n=15):
+    def plot_feature_importance(self, top_n=15, show_std=True, color_scale=True):
         """
         Plot the average feature importance across all cutoffs and training groups.
-
+        
         Parameters:
-        top_n (int): Number of top features to display (default: 15)
+        -----------
+        top_n : int
+            Number of top features to display (default: 15)
+        show_std : bool
+            Whether to show standard deviation as error bars (default: True)
+        color_scale : bool
+            Whether to use color gradient based on importance (default: True)
         """
         if not self.feature_importances:
-            print(
-                "No feature importances available. Make sure you've trained models first."
-            )
+            print("No feature importances available. Make sure you've trained models first.")
             return
-
-        # Initialize dictionaries to store cumulative importances and feature counts
-        cumulative_importances = {}
-        feature_counts = {}
-
-        # Sum up importances across all cutoffs and training groups
-        for (
-            cutoff,
-            training_group_val,
-        ), importances in self.feature_importances.items():
+        
+        # Initialize dictionaries to store importances for each feature
+        feature_importances_dict = {}
+        
+        # Collect all importances for each feature
+        for (cutoff, training_group_val), importances in self.feature_importances.items():
             model_key = (cutoff, training_group_val)
-
-            # Check if the model exists for this (cutoff, training_group_val)
+            
             if model_key not in self.models:
                 print(f"Model for {model_key} not found, skipping...")
                 continue
-
+            
             model = self.models[model_key]
-
+            
             for idx, importance in enumerate(importances):
-                # Get feature name and handle missing or misaligned feature indices
                 try:
                     feature = model.feature_name_[idx]
                 except IndexError:
-                    print(
-                        f"Feature index {idx} out of range for model {model_key}, skipping..."
-                    )
+                    print(f"Feature index {idx} out of range for model {model_key}, skipping...")
                     continue
-
-                # Aggregate importance for this feature
-                if feature not in cumulative_importances:
-                    cumulative_importances[feature] = 0
-                    feature_counts[feature] = 0
-
-                cumulative_importances[feature] += importance
-                feature_counts[feature] += 1
-
-        # Calculate average importances
-        avg_importances = {
-            feature: imp / feature_counts[feature]
-            for feature, imp in cumulative_importances.items()
-        }
-
-        # Sort features by importance and limit to top_n
-        sorted_features = sorted(
-            avg_importances.items(), key=lambda x: x[1], reverse=True
-        )
-        sorted_features = sorted_features[:top_n]  # Limit to top_n features
-
+                
+                if feature not in feature_importances_dict:
+                    feature_importances_dict[feature] = []
+                feature_importances_dict[feature].append(importance)
+        
+        # Calculate statistics
+        feature_stats = {}
+        for feature, imps in feature_importances_dict.items():
+            feature_stats[feature] = {
+                'mean': np.mean(imps),
+                'std': np.std(imps),
+                'count': len(imps)
+            }
+        
+        # Sort by mean importance and get top_n
+        sorted_features = sorted(feature_stats.items(), key=lambda x: x[1]['mean'], reverse=True)
+        sorted_features = sorted_features[:top_n]
+        
         features = [item[0] for item in sorted_features]
-        importances = [item[1] for item in sorted_features]
-
-        # Plot
-        plt.figure(figsize=(12, 8))
-        plt.barh(features, importances, color="steelblue")
-        plt.xlabel("Average Importance", fontsize=14)
-        plt.ylabel("Features", fontsize=14)
-
-        # Update title to reflect the number of features shown
-        total_features = len(avg_importances)
-        if total_features > top_n:
-            plt.title(
-                f"Top {top_n} Features by Average Importance (out of {total_features} total)",
-                fontsize=16,
-            )
+        means = [item[1]['mean'] for item in sorted_features]
+        stds = [item[1]['std'] for item in sorted_features]
+        counts = [item[1]['count'] for item in sorted_features]
+        
+        # Create figure with better styling
+        fig, ax = plt.subplots(figsize=(14, max(8, top_n * 0.5)))
+        
+        # Generate colors based on importance if color_scale is True
+        if color_scale:
+            norm_means = np.array(means) / max(means) if max(means) > 0 else np.array(means)
+            colors = plt.cm.viridis(norm_means)
         else:
-            plt.title(
-                "Average Feature Importance Across Cutoffs and Training Groups",
-                fontsize=16,
-            )
-
-        plt.gca().invert_yaxis()
+            colors = ['steelblue'] * len(features)
+        
+        # Create horizontal bar chart
+        y_pos = np.arange(len(features))
+        bars = ax.barh(y_pos, means, color=colors, alpha=0.8, edgecolor='black', linewidth=0.5)
+        
+        # Add error bars if requested
+        if show_std:
+            ax.errorbar(means, y_pos, xerr=stds, fmt='none', ecolor='darkred', 
+                        alpha=0.6, capsize=4, capthick=2, linewidth=1.5)
+        
+        # Label style
+        label_fontsize = 12
+        label_fontweight = "bold"
+        tick_fontsize = 11
+        
+        # Customize axes
+        ax.set_yticks(y_pos)
+        ax.set_yticklabels(features, fontsize=tick_fontsize)
+        ax.set_xlabel('Average Importance', fontsize=label_fontsize, fontweight=label_fontweight)
+        ax.set_ylabel('Features', fontsize=label_fontsize, fontweight=label_fontweight)
+        
+        # Update title
+        total_features = len(feature_stats)
+        if total_features > top_n:
+            title = f'Top {top_n} Features by Average Importance\n(out of {total_features} total features across {len(self.feature_importances)} models)'
+        else:
+            title = f'Average Feature Importance\n(across {len(self.feature_importances)} models)'
+        ax.set_title(title, fontsize=15, fontweight='bold', pad=20)
+        
+        # Add grid for better readability
+        ax.grid(axis='x', alpha=0.3, linestyle='--', linewidth=0.5)
+        ax.set_axisbelow(True)
+        
+        # Invert y-axis so highest importance is at top
+        ax.invert_yaxis()
+        
+        # Add colorbar if using color scale
+        if color_scale:
+            sm = plt.cm.ScalarMappable(cmap='viridis', 
+                                    norm=plt.Normalize(vmin=min(means), vmax=max(means)))
+            sm.set_array([])
+            cbar = plt.colorbar(sm, ax=ax, pad=0.02)
+            cbar.set_label('Importance Value', rotation=270, labelpad=20,
+                        fontsize=label_fontsize, fontweight=label_fontweight)
+        
         plt.tight_layout()
         plt.show()
 
