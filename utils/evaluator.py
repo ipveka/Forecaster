@@ -279,7 +279,8 @@ class Evaluator:
         :param metric_name: The name of the metric to calculate (e.g., 'RMSE', 'MAE', etc.)
         :param group_col: The column name to group by (e.g., 'fcst_lag')
         :param group_filter: Optional; a range or list of values to filter groups (e.g., range(1, 14))
-        :return: A pandas DataFrame summarizing the metric for each prediction column and baseline by group_col
+        :return: A pandas DataFrame summarizing the metric for each prediction column and baseline by group_col,
+                rounded to 2 decimals
         """
         # Filter test data
         test_data = self._filter_test_data()
@@ -305,7 +306,7 @@ class Evaluator:
 
             # Calculate baseline metrics
             baseline_predictions = group_data[self.baseline_col].values
-            current_row["Baseline"] = self._calculate_metric(
+            current_row["baseline"] = self._calculate_metric(
                 metric_name, group_actuals, baseline_predictions
             )
 
@@ -325,7 +326,10 @@ class Evaluator:
         # Set the index name to group_col
         result_df.index.name = group_col
 
-        # Transpose to have models as rows and fcst_lag as columns
+        # Transpose to have models as rows and group_col values as columns
         result_df = result_df.transpose()
+
+        # Round all values to 2 decimals
+        result_df = result_df.round(2)
 
         return result_df

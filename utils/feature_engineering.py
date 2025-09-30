@@ -1,19 +1,18 @@
-# General libraries
+# Standard library imports
 import gc
 import logging
 import os
-# Warnings
 import warnings
-# Other libraries
 from itertools import product
-# Utilities
 from pathlib import Path
 
+# Third-party imports
 import matplotlib.pyplot as plt
 import numpy as np
-# Plots
 import pandas as pd
 import psutil
+
+# ML library imports
 from lightgbm import LGBMRegressor
 from sklearn.cluster import KMeans
 from sklearn.linear_model import LinearRegression
@@ -46,6 +45,7 @@ class FeatureEngineering:
         lags=None,
         fill_lags=False,
         n_clusters=10,
+        extended_stats=False
     ):
         """
         Main function to prepare the data by calling all internal functions in order.
@@ -60,20 +60,36 @@ class FeatureEngineering:
         lags (tuple): Lag values for creating lag features
         fill_lags (bool): Whether to fill forward lags
         n_clusters (int): Number of groups for quantile clustering
+        extended_stats (bool): Whether to add extended stats
 
         Returns:
         pd.DataFrame: Prepared DataFrame
         """
-        # Start function
-        print("Starting feature engineering...")
+        # Print header
+        print("\n" + "=" * 70)
+        print("FEATURE ENGINEERING")
+        print("=" * 70)
+        
+        # Log initial dataset info
+        initial_rows = len(df)
+        initial_cols = len(df.columns)
+        initial_features = len([col for col in df.columns if col.startswith('feature_')])
+        print(f"\n📊 Input Dataset:")
+        print(f"   • Rows: {initial_rows:,}")
+        print(f"   • Columns: {initial_cols}")
+        print(f"   • Existing features: {initial_features}")
+        print(f"   • Target: '{target}'")
 
         # Convert date column to datetime once at the beginning
         df[date_col] = pd.to_datetime(df[date_col])
 
         # Auto-detect frequency if not provided
         if freq is None:
+            print(f"\n🔍 Auto-detecting frequency...")
             freq = self.detect_frequency(df, date_col)
-            print(f"Auto-detected frequency: {freq}")
+            print(f"   ✓ Detected frequency: {freq}")
+        else:
+            print(f"\n📅 Using specified frequency: {freq}")
 
         # Get frequency-specific parameters
         from utils.forecaster_utils import get_frequency_params
@@ -83,32 +99,51 @@ class FeatureEngineering:
         # Use frequency-specific parameters if not provided by user
         if fe_window_size is None:
             fe_window_size = freq_params["fe_window_size"]
-            print(f"Using frequency-based window size for features: {fe_window_size}")
+            print(f"   ✓ Using frequency-based window sizes: {fe_window_size}")
+        else:
+            print(f"   ✓ Using specified window sizes: {fe_window_size}")
 
         if lags is None:
             lags = freq_params["lags"]
-            print(f"Using frequency-based lags: {lags}")
+            print(f"   ✓ Using frequency-based lags: {lags}")
+        else:
+            print(f"   ✓ Using specified lags: {lags}")
 
         # Find categorical columns
         signal_cols = [col for col in df.select_dtypes(include=["float64"]).columns]
-        print(f"Identified signal columns: {signal_cols}")
+        print(f"\n📈 Identified {len(signal_cols)} signal column(s) for feature creation")
 
         # Get categorical columns for encoding
         categorical_columns = df.select_dtypes(include="object").columns.tolist()
         categorical_columns = [col for col in categorical_columns if col != "sample"]
-        print(f"Identified categorical columns for encoding: {categorical_columns}")
-
+        print(f"\n🏷️  Encoding {len(categorical_columns)} categorical column(s)...")
+        if categorical_columns:
+            for col in categorical_columns:
+                n_unique = df[col].nunique()
+                print(f"   • {col} ({n_unique} unique values)")
+        
         # Create encoded features
+        cols_before = len(df.columns)
         df = self.create_encoded_features(df, categorical_columns)
-        print("Encoded categorical features.")
+        cols_added = len(df.columns) - cols_before
+        print(f"   ✓ Created {cols_added} encoded feature(s)")
 
         # Add date features
+        print(f"\n📅 Creating temporal features...")
+        cols_before = len(df.columns)
         df = self.create_date_features(df, date_col, extended_dates=False)
-        print("Added date features.")
+        cols_added = len(df.columns) - cols_before
+        print(f"   ✓ Created {cols_added} date-based features")
+        print(f"      - Basic: year, quarter, month, week, day, dayofweek")
+        print(f"      - Cyclical: sin/cos encodings for seasonality")
 
         # Add periods feature
+        print(f"\n⏱️  Creating period-based features...")
+        cols_before = len(df.columns)
         df = self.create_periods_feature(df, group_cols, date_col, target)
-        print("Added periods feature.")
+        cols_added = len(df.columns) - cols_before
+        print(f"   ✓ Created {cols_added} period feature(s)")
+        print(f"      - Periods since first non-zero signal")
 
         # Find numeric columns, excluding cyclical features
         signal_cols = [
@@ -124,58 +159,111 @@ class FeatureEngineering:
                 and "trend_" not in col
             )
         ]
-        print(f"Identified signal columns for MA/lag features: {len(signal_cols)}")
-        print(f"Excluded cyclical features from MA/lag calculations")
+        print(f"\n📊 Processing {len(signal_cols)} signal(s) for MA/lag features")
+        print(f"   ℹ️  Excluded cyclical/temporal features from calculations")
 
         # Add MA features
+        print(f"\n📉 Creating moving average features...")
+        cols_before = len(df.columns)
         df = self.create_ma_features(df, group_cols, signal_cols, fe_window_size)
-        print("Added moving average features.")
+        cols_added = len(df.columns) - cols_before
+        print(f"   ✓ Created {cols_added} moving average feature(s)")
+        print(f"      - Window sizes: {fe_window_size}")
+        print(f"      - Signals: {len(signal_cols)}")
 
         # Add moving stats
+        print(f"\n📊 Creating moving statistics features...")
+        cols_before = len(df.columns)
         df = self.create_moving_stats(df, group_cols, signal_cols, fe_window_size)
-        print("Added moving statistics.")
-
-        # Add maximum consecutive zeros
-        df = self.create_max_consecutive_zeros(self, df, group_cols, target)
-        print("Added maximum consecutive zeros feature for the target variable.")
+        cols_added = len(df.columns) - cols_before
+        print(f"   ✓ Created {cols_added} moving statistic feature(s)")
+        print(f"      - Statistics: min, max, mean")
+        print(f"      - Window sizes: {fe_window_size}")
 
         # Add lag features if any feature columns are found
+        print(f"\n⏮️  Creating lag features...")
+        cols_before = len(df.columns)
         df = self.create_lag_features(
             df, group_cols, date_col, signal_cols, lags, fill_lags
         )
-        print("Added lag features.")
+        cols_added = len(df.columns) - cols_before
+        print(f"   ✓ Created {cols_added} lag feature(s)")
+        print(f"      - Lag periods: {lags}")
+        print(f"      - Fill forward: {fill_lags}")
 
         # Add coefficient of variance for target
+        print(f"\n📐 Creating statistical features for target...")
+        cols_before = len(df.columns)
         df = self.create_cov(df, group_cols, target)
-        print("Added coefficient of variance feature for the target variable.")
-
-        # Add Autocorrelation for target
-        df = self.create_autocorr(self, df, group_cols, target, lag=1)
-        print("Added autocorrelation feature for the target variable.")
+        cols_added = len(df.columns) - cols_before
+        print(f"   ✓ Created coefficient of variation feature")
 
         # Add quantile clusters
+        print(f"\n🎯 Creating quantile cluster features...")
+        cols_before = len(df.columns)
         df = self.create_quantile_clusters(df, group_cols, target, n_clusters)
-        print("Added quantile clusters.")
+        cols_added = len(df.columns) - cols_before
+        print(f"   ✓ Created {cols_added} quantile cluster feature(s)")
+        print(f"      - Number of clusters: {n_clusters}")
 
         # Add history clusters
+        print(f"\n📚 Creating history cluster features...")
+        cols_before = len(df.columns)
         df = self.create_history_clusters(df, group_cols, target, n_clusters)
-        print("Added history clusters.")
+        cols_added = len(df.columns) - cols_before
+        print(f"   ✓ Created {cols_added} history cluster feature(s)")
+        print(f"      - Number of clusters: {n_clusters}")
+
+        # Extended stats
+        if extended_stats:
+            print(f"\n🔬 Creating extended statistical features...")
+            cols_before = len(df.columns)
+            
+            # Add maximum consecutive zeros
+            df = self.create_max_consecutive_zeros(df, group_cols, target)
+            print(f"   ✓ Added maximum consecutive zeros feature")
+
+            # Add Autocorrelation for target
+            df = self.create_autocorr(df, group_cols, target, lag=1)
+            print(f"   ✓ Added autocorrelation feature (lag=1)")
+            
+            cols_added = len(df.columns) - cols_before
+            print(f"   ✓ Total extended features: {cols_added}")
+        else:
+            print(f"\n⏭️  Skipping extended statistics (extended_stats=False)")
 
         # Add train weights
+        print(f"\n⚖️  Creating training weights...")
         df = self.create_train_weights(
             df,
             group_cols,
             feature_periods_col="feature_periods",
             train_weight_type="linear",
         )
-        print("Added train weights based on the specified weighting type.")
+        print(f"   ✓ Created 'train_weight' column (type: linear)")
+        print(f"      - Gives more importance to recent observations")
 
         # Add forecast lag numbers
+        print(f"\n🔢 Creating forecast lag numbers...")
         df = self.create_fcst_lag_number(df, group_cols, date_col)
-        print("Added forecast lag numbers.")
+        print(f"   ✓ Created 'fcst_lag_number' column")
+        print(f"      - Tracks forecast horizon position")
 
-        # Final message and return
-        print("Feature engineering completed.")
+        # Final summary
+        final_cols = len(df.columns)
+        final_features = len([col for col in df.columns if col.startswith('feature_')])
+        features_added = final_features - initial_features
+        
+        print(f"\n" + "=" * 70)
+        print(f"✅ FEATURE ENGINEERING COMPLETED")
+        print(f"=" * 70)
+        print(f"   • Final shape: {df.shape[0]:,} rows × {df.shape[1]} columns")
+        print(f"   • Total features: {final_features} (+{features_added} new)")
+        print(f"   • Frequency: {freq}")
+        print(f"   • Window sizes: {fe_window_size}")
+        print(f"   • Lags: {lags}")
+        print("=" * 70 + "\n")
+        
         return df
 
     # Detect frequency
@@ -646,7 +734,7 @@ class FeatureEngineering:
     # Calculate moving stats
     def create_moving_stats(self, df, group_columns, signal_columns, fe_window_size):
         """
-        Calculate moving statistics (min, max, mean, median, std) for given signal columns, grouped by group columns, for multiple window sizes.
+        Calculate moving statistics (min, max, mean) for given signal columns, grouped by group columns, for multiple window sizes.
 
         Parameters:
         - df: pandas DataFrame
@@ -685,11 +773,7 @@ class FeatureEngineering:
                     "max": lambda x: x.rolling(window=window_size, min_periods=1).max(),
                     "mean": lambda x: x.rolling(
                         window=window_size, min_periods=1
-                    ).mean(),
-                    "median": lambda x: x.rolling(
-                        window=window_size, min_periods=1
-                    ).median(),
-                    "std": lambda x: x.rolling(window=window_size, min_periods=1).std(),
+                    ).mean()
                 }
 
                 for stat_name, stat_func in stats.items():
@@ -970,15 +1054,35 @@ class FeatureEngineering:
 
             autocorr_col = f"feature_{value_column}_autocorr_lag{lag}"
 
-            # Grouped autocorrelation calculation
+            # Grouped autocorrelation calculation with error handling
             def autocorr_func(x):
-                if len(x) <= lag or x.var() == 0:
-                    return np.nan  # Not enough data or zero variance
-                return x.autocorr(lag)
+                try:
+                    # Check for sufficient data and non-zero variance
+                    if len(x) <= lag + 1:
+                        return np.nan
+                        
+                    # Check for constant series (variance = 0)
+                    if np.isclose(x.var(), 0, atol=1e-10):
+                        return np.nan
+                        
+                    # Calculate autocorrelation with error handling
+                    with np.errstate(divide='ignore', invalid='ignore'):
+                        corr = x.autocorr(lag)
+                        
+                    # Handle any invalid results
+                    if not np.isfinite(corr):
+                        return np.nan
+                        
+                    return corr
+                    
+                except Exception as e:
+                    # Catch any unexpected errors during calculation
+                    print(f"Warning in autocorrelation calculation: {str(e)}")
+                    return np.nan
 
             # Compute autocorrelation per group
             autocorr_values = (
-                df[df[value_column].notnull()]  # avoid spurious NaNs
+                df[df[value_column].notnull()]
                 .groupby(group_columns)[value_column]
                 .apply(autocorr_func)
                 .fillna(0)
