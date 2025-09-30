@@ -24,3 +24,7 @@ pydantic>=1.8.0
 
 # Other
 google
+
+# Formatting
+black>=24.3.0
+isort>=5.13.2
