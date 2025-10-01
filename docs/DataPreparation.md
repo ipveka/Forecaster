@@ -43,17 +43,22 @@ This class is responsible for preparing the data before the forecasting process.
 
 ### 5. `get_latest_n_dates`
 
-- **Description**: Retrieves the latest `n` distinct dates from the dataset.
-- **Parameters**: Input DataFrame (`df`), date column, and the number of cutoffs to retrieve.
-- **Returns**: A series of the latest `n` distinct dates.
+- **Description**: Retrieves the latest `n` distinct dates from the dataset, considering only dates where the target is > 0 and not NaN.
+- **Parameters**: Input DataFrame (`df`), date column, target column, and the number of cutoffs to retrieve.
+- **Returns**: A series of the latest `n` distinct dates with valid target values.
+- **Recent Updates**: Now filters to only include dates with valid target data to ensure meaningful cutoffs.
 
 ---
 
 ### 6. `get_first_dates_last_n_months`
 
-- **Description**: Retrieves the first date from each of the last `n` months.
-- **Parameters**: Input DataFrame (`df`), date column, and number of months (`n_cutoffs`).
-- **Returns**: A list of the first dates of the last `n` months.
+- **Description**: Retrieves cutoff dates for backtesting, ensuring the latest valid date is always included. For n_cutoffs > 1, also includes the first date of previous months. All dates are filtered to only include dates where target is > 0 and not NaN.
+- **Parameters**: Input DataFrame (`df`), date column, target column, and number of cutoffs (`n_cutoffs`).
+- **Returns**: A list of cutoff dates, with the latest valid date always first (for forecasting), followed by first dates of previous months (for backtesting).
+- **Recent Updates**: 
+  - Now always includes the latest date with valid target as the primary cutoff for forecasting
+  - Filters to only consider dates where target > 0 and not NaN
+  - Prevents issues with forecast horizons extending beyond actual data availability
 
 ---
 

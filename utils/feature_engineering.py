@@ -93,7 +93,6 @@ class FeatureEngineering:
 
         # Get frequency-specific parameters
         from utils.forecaster_utils import get_frequency_params
-
         freq_params = get_frequency_params(freq)
 
         # Use frequency-specific parameters if not provided by user
@@ -112,15 +111,18 @@ class FeatureEngineering:
         # Find categorical columns
         signal_cols = [col for col in df.select_dtypes(include=["float64"]).columns]
         print(f"\n📈 Identified {len(signal_cols)} signal column(s) for feature creation")
+        if signal_cols:
+            print(f"   • Signal columns: {', '.join(signal_cols)}")
 
         # Get categorical columns for encoding
         categorical_columns = df.select_dtypes(include="object").columns.tolist()
         categorical_columns = [col for col in categorical_columns if col != "sample"]
         print(f"\n🏷️  Encoding {len(categorical_columns)} categorical column(s)...")
         if categorical_columns:
+            print(f"   • Columns to encode: {', '.join(categorical_columns)}")
             for col in categorical_columns:
                 n_unique = df[col].nunique()
-                print(f"   • {col} ({n_unique} unique values)")
+                print(f"     - {col}: {n_unique} unique values")
         
         # Create encoded features
         cols_before = len(df.columns)
@@ -160,6 +162,8 @@ class FeatureEngineering:
             )
         ]
         print(f"\n📊 Processing {len(signal_cols)} signal(s) for MA/lag features")
+        if signal_cols:
+            print(f"   • Signals for MA/lags: {', '.join(signal_cols)}")
         print(f"   ℹ️  Excluded cyclical/temporal features from calculations")
 
         # Add MA features
@@ -188,6 +192,8 @@ class FeatureEngineering:
         )
         cols_added = len(df.columns) - cols_before
         print(f"   ✓ Created {cols_added} lag feature(s)")
+        if signal_cols:
+            print(f"      - Signals: {', '.join(signal_cols)}")
         print(f"      - Lag periods: {lags}")
         print(f"      - Fill forward: {fill_lags}")
 

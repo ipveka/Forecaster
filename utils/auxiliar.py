@@ -37,7 +37,8 @@ def unpivot_data(df, id_vars, var_name="Date", value_name="Price"):
 
 # Function to create a single axis plot for a specific entity
 def create_single_axis_plot(
-    ax, df, entity, group_col, cutoff, baseline_col, target_col, title
+    ax, df, entity, group_col, cutoff, date_col="date", baseline_col="baseline", 
+    target_col="sales", title=""
 ):
     """
     Create an enhanced single-axis plot for the specified entity.
@@ -47,27 +48,28 @@ def create_single_axis_plot(
     :param entity: The entity to plot (e.g., product, store)
     :param group_col: The column name used for grouping
     :param cutoff: The cutoff date for the analysis
-    :param baseline_col: The column name for baseline data
-    :param target_col: The column name for target data
-    :param title: Title for the plot
+    :param date_col: The column name for date data (default: 'date')
+    :param baseline_col: The column name for baseline data (default: 'baseline')
+    :param target_col: The column name for target data (default: 'sales')
+    :param title: Title for the plot (default: '')
     """
     cutoff_date = pd.to_datetime(cutoff)
     
     # Separate pre and post cutoff data
-    pre_cutoff = df[df["date"] <= cutoff_date]
-    post_cutoff = df[df["date"] > cutoff_date]
+    pre_cutoff = df[df[date_col] <= cutoff_date]
+    post_cutoff = df[df[date_col] > cutoff_date]
     
     # Plot actual sales
-    ax.plot(df["date"], df[target_col], label="Actual Sales", 
+    ax.plot(df[date_col], df[target_col], label="Actual Sales", 
             color="#2E86AB", linewidth=2.5, zorder=4)
     
     # Plot model_prediction (if exists) - original model output before guardrail
     if "model_prediction" in df.columns and len(post_cutoff) > 0:
         # Connect last pre-cutoff point to first post-cutoff point
         connection_df = pd.concat([pre_cutoff.tail(1), post_cutoff])
-        ax.plot(connection_df["date"], connection_df["model_prediction"], 
+        ax.plot(connection_df[date_col], connection_df["model_prediction"], 
                 color="#F77F00", linewidth=1.5, linestyle="-.", alpha=0.6, zorder=2)
-        ax.plot(post_cutoff["date"], post_cutoff["model_prediction"], 
+        ax.plot(post_cutoff[date_col], post_cutoff["model_prediction"], 
                 label="Model Prediction", color="#F77F00", linewidth=1.5, 
                 linestyle="-.", alpha=0.6, zorder=2)
     
@@ -75,20 +77,20 @@ def create_single_axis_plot(
     if len(post_cutoff) > 0:
         # Connect last pre-cutoff point to first post-cutoff point
         connection_df = pd.concat([pre_cutoff.tail(1), post_cutoff])
-        ax.plot(connection_df["date"], connection_df["prediction"], 
+        ax.plot(connection_df[date_col], connection_df["prediction"], 
                 color="#06A77D", linewidth=2, linestyle="--", alpha=0.9, zorder=3)
-        ax.plot(post_cutoff["date"], post_cutoff["prediction"], 
+        ax.plot(post_cutoff[date_col], post_cutoff["prediction"], 
                 label="Final Prediction", color="#06A77D", linewidth=2, 
                 linestyle="--", alpha=0.9, zorder=3)
     
     # Plot baseline
-    ax.plot(df["date"], df[baseline_col], label="Baseline", 
+    ax.plot(df[date_col], df[baseline_col], label="Baseline", 
             color="#D62828", linewidth=1.8, linestyle=":", 
             alpha=0.7, zorder=1)
     
     # Add shaded region for forecast period
     if len(post_cutoff) > 0:
-        ax.axvspan(cutoff_date, df["date"].max(), 
+        ax.axvspan(cutoff_date, df[date_col].max(), 
                    alpha=0.1, color='gray', label='Forecast Period')
     
     # Add vertical line for cutoff
@@ -105,8 +107,10 @@ def create_single_axis_plot(
     ax.xaxis.set_major_formatter(mdates.DateFormatter("%Y-%m"))
     ax.tick_params(axis='x', rotation=45)
     
-    # Title
-    ax.set_title(f"{group_col.upper()}: {entity} | Cutoff: {cutoff_date.strftime('%Y-%m-%d')}", 
+    # Title - handle group_col as string or list
+    group_label = group_col.upper() if isinstance(group_col, str) else "-".join([col.upper() for col in group_col])
+    entity_label = str(entity) if not isinstance(entity, tuple) else "-".join([str(e) for e in entity])
+    ax.set_title(f"{group_label}: {entity_label} | Cutoff: {cutoff_date.strftime('%Y-%m-%d')}", 
                 fontsize=12, fontweight='bold', pad=12)
     
     # Legend with better positioning
@@ -124,28 +128,36 @@ def create_single_axis_plot(
 
 # Process and plot
 def process_and_plot(
-    df, group_col, baseline_col="baseline", target_col="sales", 
+    df, group_col, date_col="date", baseline_col="baseline", target_col="sales", 
     top_n=1, title="", figsize_per_row=4.5
 ):
     """
     Process and plot sales, predictions, and baseline data with enhanced visualization.
 
     :param df: Input DataFrame with sales, predictions, and baseline data
-    :param group_col: Column name to group by (e.g., entity, store, product)
+    :param group_col: Column name(s) to group by. Can be a string (e.g., 'product') or list (e.g., ['store', 'product'])
+    :param date_col: Column name for date data (default: 'date')
     :param baseline_col: Column name for baseline data (default: 'baseline')
     :param target_col: Column name for target data (default: 'sales')
     :param top_n: Number of top entities to visualize based on total sales
     :param title: Overall title for the plot
     :param figsize_per_row: Height per row of subplots (default: 4.5)
     """
+    # Ensure group_col is a list for consistent handling
+    group_cols = [group_col] if isinstance(group_col, str) else group_col
+    
     # Ensure date is in datetime format
-    df["date"] = pd.to_datetime(df["date"])
+    df[date_col] = pd.to_datetime(df[date_col])
     
     # Get unique cutoffs
     cutoffs = sorted(df["cutoff"].unique())
     
     # Select top N entities based on total sales
-    top_entities = df.groupby(group_col)[target_col].sum().nlargest(top_n).index.tolist()
+    top_entities = df.groupby(group_cols)[target_col].sum().nlargest(top_n).index.tolist()
+    
+    # Convert single values to tuples for consistent handling
+    if isinstance(group_col, str):
+        top_entities = [(entity,) if not isinstance(entity, tuple) else entity for entity in top_entities]
     
     # Calculate layout
     total_plots = len(top_entities) * len(cutoffs)
@@ -168,8 +180,17 @@ def process_and_plot(
     plot_idx = 0
     for entity in top_entities:
         for cutoff in cutoffs:
-            # Filter data
-            df_cutoff = df[(df["cutoff"] == cutoff) & (df[group_col] == entity)]
+            # Filter data based on group columns
+            if isinstance(group_col, str):
+                # Single column - entity is a tuple with one element
+                mask = (df["cutoff"] == cutoff) & (df[group_col] == entity[0])
+            else:
+                # Multiple columns - entity is a tuple
+                mask = (df["cutoff"] == cutoff)
+                for col, val in zip(group_cols, entity):
+                    mask &= (df[col] == val)
+            
+            df_cutoff = df[mask]
             
             # Group by date
             agg_dict = {target_col: "sum", "prediction": "sum", baseline_col: "sum"}
@@ -179,7 +200,7 @@ def process_and_plot(
                 agg_dict["model_prediction"] = "sum"
             
             df_grouped = (
-                df_cutoff.groupby("date")
+                df_cutoff.groupby(date_col)
                 .agg(agg_dict)
                 .reset_index()
             )
@@ -188,7 +209,7 @@ def process_and_plot(
             if plot_idx < len(axes):
                 create_single_axis_plot(
                     axes[plot_idx], df_grouped, entity, group_col,
-                    cutoff, baseline_col, target_col, title
+                    cutoff, date_col, baseline_col, target_col, title
                 )
             plot_idx += 1
     
@@ -199,52 +220,4 @@ def process_and_plot(
     # Adjust layout
     plt.tight_layout()
     plt.show()
-
-# Prepare submission
-def prepare_submission(df, value_to_pivot):
-    """
-    Prepares a submission DataFrame by filtering and pivoting the given DataFrame.
-
-    This function filters the DataFrame for the latest cutoff date and the test samples,
-    then pivots it so that unique dates become columns with corresponding values
-    from the specified column (baseline, prediction, or others).
-    """
-
-    # Ensure the 'date' and 'cutoff' columns are in datetime format
-    df["date"] = pd.to_datetime(df["date"])
-    df["cutoff"] = pd.to_datetime(df["cutoff"])
-
-    # Filter for the latest cutoff
-    latest_cutoff = df["cutoff"].max()
-    print(
-        f"Latest cutoff date selected: {latest_cutoff}"
-    )  # Print the latest cutoff date
-
-    # Filter for rows with the latest cutoff and 'test' samples
-    filtered_df = df[(df["cutoff"] == latest_cutoff) & (df["sample"] == "test")]
-
-    # Filter for rows where 'date' is after the latest cutoff
-    filtered_df = filtered_df[filtered_df["date"] > latest_cutoff]
-
-    # Select relevant columns
-    filtered_df = filtered_df[
-        ["client", "warehouse", "product", "date", value_to_pivot]
-    ]
-
-    # Pivot the DataFrame wider
-    pivoted_df = filtered_df.pivot_table(
-        index=["client", "warehouse", "product"],
-        columns="date",
-        values=value_to_pivot,
-        aggfunc="first",
-    ).reset_index()
-
-    # Flatten the columns
-    pivoted_df.columns.name = None  # Remove the index name
-    pivoted_df.columns = [
-        str(col.date()) if isinstance(col, pd.Timestamp) else col
-        for col in pivoted_df.columns
-    ]
-
-    return pivoted_df
     
