@@ -12,7 +12,6 @@ The class has been designed to work within the Forecaster pipeline and follows a
   - `group_cols` (list): Columns to group the data (e.g., ['client', 'warehouse', 'product']).
   - `date_col` (str): Column containing dates.
   - `signal_cols` (list): List of signal columns to create baselines for.
-  - `baseline_types` (list): List of baseline types to create ('MA' for moving average, 'LR' for linear regression, 'ML' for LightGBM). Default: ['MA', 'LR', 'ML'].
   - `bs_window_size` (int): Window size for moving average baseline. Default: 13.
   - `feature_cols` (list): Feature columns for regression models (required for 'LR' and 'ML' baseline types). Default: None.
 - **Recent Updates**: Parameter has been renamed from `window_size` to `bs_window_size` for clarity and consistency across the framework.
@@ -25,16 +24,15 @@ The class has been designed to work within the Forecaster pipeline and follows a
   - `df` (pd.DataFrame): The input DataFrame with columns such as 'client', 'warehouse', 'product', 'date', 'sales', 'price', 'filled_sales', 'filled_price', and 'sample'.
   - `group_cols` (list): List of columns to group by (e.g., `['client', 'warehouse', 'product']`).
   - `date_col` (str): Name of the date column.
-  - `signal_cols` (list): List of signal columns to use for calculating the baselines.
-  - `bs_window_size` (int): Size of the moving average window.
-- **Recent Updates**: Parameter has been renamed from `window_size` to `bs_window_size` for clarity and consistency across the framework.
-- **Returns**: pd.DataFrame: DataFrame with additional columns: `baseline_{signal_col}` and `feature_baseline_{signal_col}` for each signal column.
+  - `signal_cols` (str or list): The signal column(s) to use for calculating the baselines. Can be a single column name (str) like `'sales'` or a list of column names like `['sales', 'price']`.
+  - `bs_window_size` (int or list[int]): Size(s) of the moving average window(s). Can be a single integer or a list of integers.
+  - `create_features` (bool, optional): If True, also create `feature_baseline_*` columns. Default is False.
+- **Recent Updates**: 
+  - Parameter `window_size` renamed to `bs_window_size` for clarity and consistency
+  - Now accepts `signal_cols` as either a string (single column) or list (multiple columns)
+- **Returns**: pd.DataFrame: DataFrame with additional columns: `baseline_{signal_col}_ma_{window}` and optionally `feature_baseline_{signal_col}_ma_{window}` for each signal column and window size.
 
 ## 3. `create_lr_baseline`
-
-- **Description**: Adds linear regression (LR) baselines and feature baselines for each signal column to the test set. For the train set, stores the actual values in the baseline columns.
-- **Parameters**:
-  - `df` (pd.DataFrame): The input DataFrame with columns such as 'client', 'warehouse', 'product', 'date', 'sales', 'price', 'filled_sales', 'filled_price', and 'sample'.
   - `group_cols` (list): List of columns to group by (e.g., `['client', 'warehouse', 'product']`).
   - `date_col` (str): Name of the date column.
   - `signal_cols` (list): List of signal columns to predict using linear regression.

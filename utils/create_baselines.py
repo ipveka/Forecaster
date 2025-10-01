@@ -197,8 +197,9 @@ class CreateBaselines:
             The list of columns to group by (e.g., ['client', 'warehouse', 'product']).
         date_col : str
             The name of the date column.
-        signal_cols : list
-            The list of signal columns to use for calculating the baselines.
+        signal_cols : str or list
+            The signal column(s) to use for calculating the baselines.
+            Can be a single column name (str) or a list of column names.
         bs_window_size : int or list[int]
             The size(s) of the moving average window(s).
         create_features : bool, optional (default=False)
@@ -212,6 +213,12 @@ class CreateBaselines:
             - Always:  'baseline_{signal_col}_ma_{window}'
             - If True: 'feature_baseline_{signal_col}_ma_{window}'
         """
+        # Ensure signal_cols is a list
+        if isinstance(signal_cols, str):
+            signal_cols = [signal_cols]
+        else:
+            signal_cols = list(signal_cols)
+        
         # Ensure bs_window_size is a list
         if isinstance(bs_window_size, int):
             window_sizes = [bs_window_size]

@@ -82,6 +82,16 @@ class DataPreparation:
         df[date_col] = pd.to_datetime(df[date_col])
         date_range = f"{df[date_col].min().date()} to {df[date_col].max().date()}"
         print(f"   ✓ Date range: {date_range}")
+        
+        # Show date range for non-zero, non-NaN target values
+        valid_target_mask = (df[target] > 0) & (df[target].notna())
+        if valid_target_mask.any():
+            valid_target_df = df[valid_target_mask]
+            target_date_range = f"{valid_target_df[date_col].min().date()} to {valid_target_df[date_col].max().date()}"
+            n_valid_records = valid_target_mask.sum()
+            print(f"   ✓ Target > 0 & not NaN: {n_valid_records:,} records ({target_date_range})")
+        else:
+            print(f"   ⚠️  Warning: No records found where target > 0 and not NaN")
 
         # Auto-detect frequency if not provided
         if freq is None:
@@ -141,10 +151,11 @@ class DataPreparation:
 
         # Get last cutoffs
         print(f"\n📅 Creating {n_cutoffs} cutoff(s) for backtesting...")
-        cutoff_dates = self.get_first_dates_last_n_months(df, date_col, n_cutoffs)
-        print(f"   ✓ Cutoff dates:")
+        cutoff_dates = self.get_first_dates_last_n_months(df, date_col, target, n_cutoffs)
+        print(f"   ✓ Cutoff dates (based on dates with valid target):")
         for i, cutoff_date in enumerate(cutoff_dates, 1):
-            print(f"      {i}. {pd.to_datetime(cutoff_date).date()}")
+            cutoff_label = " [LATEST - Used for future forecasting]" if i == 1 else ""
+            print(f"      {i}. {pd.to_datetime(cutoff_date).date()}{cutoff_label}")
 
         # Create backtesting
         print(f"\n🔀 Creating train/test splits...")
@@ -370,13 +381,15 @@ class DataPreparation:
         return df_copy
 
     # Latest dates
-    def get_latest_n_dates(self, df, date_col, n_cutoffs):
+    def get_latest_n_dates(self, df, date_col, target, n_cutoffs):
         """
-        Get the latest n distinct dates from the DataFrame.
+        Get the latest n distinct dates from the DataFrame,
+        considering only dates where the target is > 0 and not NaN.
 
         Parameters:
         df (pd.DataFrame): The input DataFrame.
         date_col (str): The name of the date column.
+        target (str): The name of the target column.
         n_cutoffs (int): The number of distinct dates to retrieve.
 
         Returns:
@@ -386,8 +399,14 @@ class DataPreparation:
         # Ensure the date column is in datetime format
         df[date_col] = pd.to_datetime(df[date_col])
 
+        # Filter to only dates where target is valid (> 0 and not NaN)
+        valid_target_df = df[(df[target] > 0) & (df[target].notna())].copy()
+        
+        if valid_target_df.empty:
+            raise ValueError(f"No valid target values found (target > 0 and not NaN) in column '{target}'")
+
         # Get distinct dates, sorted in descending order
-        distinct_dates = df[date_col].drop_duplicates().sort_values(ascending=False)
+        distinct_dates = valid_target_df[date_col].drop_duplicates().sort_values(ascending=False)
 
         # Select the latest n distinct dates
         latest_dates = distinct_dates.head(n_cutoffs)
@@ -395,34 +414,55 @@ class DataPreparation:
         return latest_dates
 
     # Latest month first weeks
-    def get_first_dates_last_n_months(self, df, date_col, n_cutoffs):
+    def get_first_dates_last_n_months(self, df, date_col, target, n_cutoffs):
         """
-        Get the first date for the last n months from the DataFrame.
+        Get cutoff dates for backtesting, ensuring the latest valid date is always included.
+        For n_cutoffs > 1, also includes the first date of previous months.
+        All dates are filtered to only include dates where target is > 0 and not NaN.
 
         Parameters:
         df (pd.DataFrame): The input DataFrame.
         date_col (str): The name of the date column.
-        n_cutoffs (int): The number of months to retrieve.
+        target (str): The name of the target column.
+        n_cutoffs (int): The number of cutoffs to retrieve.
 
         Returns:
-        list: A list containing the first date of each of the last n months.
+        list: A list containing cutoff dates, with the latest valid date always first.
         """
 
         # Ensure the date column is in datetime format
         df[date_col] = pd.to_datetime(df[date_col])
 
-        # Group by year and month, then get the first date for each month
-        first_dates_per_month = df.groupby(df[date_col].dt.to_period("M"))[
-            date_col
-        ].min()
+        # Filter to only dates where target is valid (> 0 and not NaN)
+        valid_target_df = df[(df[target] > 0) & (df[target].notna())].copy()
+        
+        if valid_target_df.empty:
+            raise ValueError(f"No valid target values found (target > 0 and not NaN) in column '{target}'")
 
-        # Get the latest n months
-        latest_first_dates = first_dates_per_month.sort_index(ascending=False).head(
-            n_cutoffs
-        )
+        # Always get the latest date with valid target (for forecasting)
+        latest_date = valid_target_df[date_col].max()
+        cutoff_dates = [latest_date]
+        
+        # If we need more cutoffs, get first dates from previous months
+        if n_cutoffs > 1:
+            # Group by year and month, then get the first date for each month
+            first_dates_per_month = valid_target_df.groupby(valid_target_df[date_col].dt.to_period("M"))[
+                date_col
+            ].min()
+            
+            # Get the latest n-1 months (excluding the current month if latest_date is already included)
+            # Sort in descending order and take enough to fill n_cutoffs
+            sorted_first_dates = first_dates_per_month.sort_index(ascending=False)
+            
+            for first_date in sorted_first_dates:
+                # Skip if this date is the same as latest_date (avoid duplicates)
+                if first_date != latest_date and len(cutoff_dates) < n_cutoffs:
+                    cutoff_dates.append(first_date)
+                    
+                if len(cutoff_dates) >= n_cutoffs:
+                    break
 
-        # Convert to list and return
-        return latest_first_dates.tolist()
+        return cutoff_dates
 
     # Create cutoffs (optimized for performance)
     def create_backtesting_df(self, df, date_col, cutoff_dates):
@@ -559,7 +599,7 @@ class DataPreparation:
 
         # Fill forward within each group
         for col in string_columns:
-            result[col] = result.groupby(group_cols)[col].transform(lambda x: x.ffill())
+            result[col] = result.groupby(group_cols)[col].transform(lambda x: x.ffill()).infer_objects(copy=False)
 
         # Also fill forward any filled_* columns to ensure no NaNs in the forecast horizon
         filled_columns = [col for col in result.columns if col.startswith("filled_")]
@@ -567,6 +607,6 @@ class DataPreparation:
             if col in result.columns:
                 result[col] = result.groupby(group_cols)[col].transform(
                     lambda x: x.ffill()
-                )
+                ).infer_objects(copy=False)
 
         return result
