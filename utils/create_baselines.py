@@ -268,6 +268,116 @@ class CreateBaselines:
         # Concatenate the modified train and test sets back together
         final_df = pd.concat([train_df, test_df], ignore_index=True)
         return final_df
+    
+    # Croston Baseline
+    def create_croston_baseline(
+            self, df, group_cols, date_col, signal_cols, alpha=0.1, create_features=False
+        )-> "pd.DataFrame":
+            """
+            Add Croston baseline for intermittent demand forecasting.
+
+            Parameters:
+            -----------
+            df : pd.DataFrame
+                Input DataFrame with 'sample' column indicating train/test.
+            group_cols : list
+                Columns to group by (e.g., ['client', 'warehouse', 'product']).
+            date_col : str
+                Name of the date column.
+            signal_cols : str or list
+                Signal column(s) to create Croston baseline for.
+            alpha : float, optional
+                Smoothing parameter for Croston method (default=0.1).
+            create_features : bool, optional
+                If True, also create `feature_baseline_*` columns.
+
+            Returns:
+            --------
+            pd.DataFrame
+                DataFrame with added Croston baseline columns.
+            """
+
+            # Ensure signal_cols is a list
+            if isinstance(signal_cols, str):
+                signal_cols = [signal_cols]
+
+            # Sort the DataFrame by group and date
+            df = df.sort_values(by=group_cols + [date_col])
+
+            # Split train/test
+            train_df = df[df["sample"] == "train"].copy()
+            test_df = df[df["sample"] == "test"].copy()
+
+            # Define a simple Croston function
+            def croston_forecast(y, alpha=0.1) -> np.ndarray:
+                """
+                Simple Croston forecast for intermittent demand.
+
+                Parameters:
+                -----------
+                y : np.ndarray
+                    Historical demand values.
+                alpha : float
+                    Smoothing parameter.
+
+                Returns:
+                --------
+                np.ndarray
+                    Forecasted values of the same length as y.
+                """                
+                n = len(y)
+                demand = np.array(y)
+                forecast = np.zeros(n)
+                p = 1  # period until next demand
+                a = demand[0] if demand[0] > 0 else 0.0
+                q = p
+
+                for t in range(1, n):
+                    if demand[t] > 0:
+                        a = a + alpha * (demand[t] - a)
+                        q = q + alpha * (p - q)
+                        p = 1
+                    else:
+                        p += 1
+                    forecast[t] = a / max(q, 1e-6)  # avoid division by zero
+                return forecast
+
+            # Iterate over each signal column
+            for signal_col in signal_cols:
+                baseline_col = f"baseline_{signal_col}_croston"
+                feature_col = f"feature_baseline_{signal_col}_croston"
+
+                # Apply Croston per group for train
+                croston_results = []
+                for group_values, group_data in train_df.groupby(group_cols):
+                    y_train = group_data[signal_col].fillna(0).values
+                    forecast = croston_forecast(y_train, alpha=alpha)
+                    group_data[baseline_col] = forecast
+                    if create_features:
+                        group_data[feature_col] = forecast
+                    croston_results.append(group_data)
+
+                train_df = pd.concat(croston_results, ignore_index=True)
+
+                # Propagate last forecast to test set
+                for group_values, group_test in test_df.groupby(group_cols):
+
+                    # Find last forecast from train
+                    mask = (train_df[group_cols] == np.array(group_values)).all(axis=1)
+                    if mask.any():
+                        last_forecast = train_df.loc[mask, baseline_col].iloc[-1]
+                        test_df.loc[group_test.index, baseline_col] = last_forecast
+                        if create_features:
+                            test_df.loc[group_test.index, feature_col] = last_forecast
+                    else:
+                        # If group not in train, fill 0
+                        test_df.loc[group_test.index, baseline_col] = 0
+                        if create_features:
+                            test_df.loc[group_test.index, feature_col] = 0
+
+            # Concatenate train and test
+            final_df = pd.concat([train_df, test_df], ignore_index=True)
+            return final_df
 
     # LR Baseline
     def create_lr_baseline(
