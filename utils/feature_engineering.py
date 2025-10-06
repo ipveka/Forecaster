@@ -200,9 +200,15 @@ class FeatureEngineering:
         # Add coefficient of variance for target
         print(f"\n📐 Creating statistical features for target...")
         cols_before = len(df.columns)
-        df = self.create_cov(df, group_cols, target)
+        df = self.create_cov(df, group_cols, target, date_col)
         cols_added = len(df.columns) - cols_before
-        print(f"   ✓ Created coefficient of variation feature")
+        print(f"   ✓ Created coefficient of variation feature (with seasonality/trend removal)")
+
+        # Add intermittence for target
+        cols_before = len(df.columns)
+        df = self.create_intermittence(df, group_cols, target)
+        cols_added = len(df.columns) - cols_before
+        print(f"   ✓ Created intermittence feature")
 
         # Add quantile clusters
         print(f"\n🎯 Creating quantile cluster features...")
@@ -211,15 +217,7 @@ class FeatureEngineering:
         cols_added = len(df.columns) - cols_before
         print(f"   ✓ Created {cols_added} quantile cluster feature(s)")
         print(f"      - Number of clusters: {n_clusters}")
-
-        # Add history clusters
-        print(f"\n📚 Creating history cluster features...")
-        cols_before = len(df.columns)
-        df = self.create_history_clusters(df, group_cols, target, n_clusters)
-        cols_added = len(df.columns) - cols_before
-        print(f"   ✓ Created {cols_added} history cluster feature(s)")
-        print(f"      - Number of clusters: {n_clusters}")
-
+        
         # Extended stats
         if extended_stats:
             print(f"\n🔬 Creating extended statistical features...")
@@ -249,10 +247,10 @@ class FeatureEngineering:
         print(f"   ✓ Created 'train_weight' column (type: linear)")
         print(f"      - Gives more importance to recent observations")
 
-        # Add forecast lag numbers
-        print(f"\n🔢 Creating forecast lag numbers...")
-        df = self.create_fcst_lag_number(df, group_cols, date_col)
-        print(f"   ✓ Created 'fcst_lag_number' column")
+        # Add horizon numbers
+        print(f"\n🔢 Creating horizon numbers...")
+        df = self.create_horizon_number(df, group_cols, date_col)
+        print(f"   ✓ Created 'horizon' column")
         print(f"      - Tracks forecast horizon position")
 
         # Final summary
@@ -937,20 +935,103 @@ class FeatureEngineering:
 
         return df_copy
 
+    def _calculate_cov_with_decomposition(self, df, group_columns, value_column, date_col):
+        """
+        Helper function to calculate coefficient of variation after removing seasonality and trend.
+        
+        Parameters:
+        -----------
+        df : pd.DataFrame
+            Input DataFrame with train data only
+        group_columns : list
+            Columns to group by
+        value_column : str
+            Column to calculate CV for
+        date_col : str
+            Date column for time series decomposition
+            
+        Returns:
+        --------
+        pd.DataFrame
+            DataFrame with mean and std of residuals (after removing trend and seasonality)
+        """
+        
+        results = []
+        
+        for group_values, group_data in df.groupby(group_columns):
+            if len(group_data) < 4:  # Need at least 4 points for decomposition
+                # Fallback to original method for small groups
+                mean_val = group_data[value_column].mean()
+                std_val = group_data[value_column].std()
+            else:
+                try:
+                    # Sort by date for proper time series decomposition
+                    group_data_sorted = group_data.sort_values(date_col)
+                    
+                    # Create time series for decomposition
+                    ts = group_data_sorted[value_column].values
+                    
+                    # Perform seasonal decomposition
+                    decomposition = seasonal_decompose(
+                        ts, 
+                        model='additive', 
+                        period=min(7, len(ts)//2) if len(ts) > 7 else 2
+                    )
+                    
+                    # Use residuals (after removing trend and seasonality)
+                    residuals = decomposition.resid
+                    
+                    # Remove NaN values from residuals
+                    residuals = residuals[~np.isnan(residuals)]
+                    
+                    if len(residuals) > 0:
+                        mean_val = np.mean(residuals)
+                        std_val = np.std(residuals)
+                    else:
+                        # Fallback if all residuals are NaN
+                        mean_val = group_data[value_column].mean()
+                        std_val = group_data[value_column].std()
+                        
+                except Exception as e:
+                    # Fallback to original method if decomposition fails
+                    mean_val = group_data[value_column].mean()
+                    std_val = group_data[value_column].std()
+            
+            # Create result row
+            result_row = {col: val for col, val in zip(group_columns, group_values)}
+            result_row['mean'] = mean_val
+            result_row['std'] = std_val
+            results.append(result_row)
+        
+        # Convert to DataFrame and set group_columns as index
+        result_df = pd.DataFrame(results)
+        result_df = result_df.set_index(group_columns)
+        
+        return result_df
+
     # Create coefficient of variance
-    def create_cov(self, df, group_columns, value_columns):
+    def create_cov(self, df, group_columns, value_columns, date_col):
         """
         Calculate the coefficient of variation (CV) for multiple value columns within each group,
         excluding zeros from the calculation and only using rows where 'sample' equals 'train'.
+        Always removes seasonality and trend before calculating CV for better time series analysis.
 
         Parameters:
-        df (pd.DataFrame): Input DataFrame containing the group and value columns.
-        group_columns (list): List of columns to group by (e.g., ['client', 'warehouse', 'product']).
-        value_columns (list or str): List of value columns for which to calculate CV (e.g., ['sales', 'price']).
-                                    Can also be a single column name as a string (e.g., 'sales').
+        -----------
+        df : pd.DataFrame
+            Input DataFrame containing the group and value columns.
+        group_columns : list
+            List of columns to group by (e.g., ['client', 'warehouse', 'product']).
+        value_columns : list or str
+            List of value columns for which to calculate CV (e.g., ['sales', 'price']).
+            Can also be a single column name as a string (e.g., 'sales').
+        date_col : str
+            Name of the date column for time series decomposition.
 
         Returns:
-        pd.DataFrame: DataFrame with additional CV columns for each value column, joined back to the full DataFrame.
+        --------
+        pd.DataFrame
+            DataFrame with additional CV columns for each value column, joined back to the full DataFrame.
         """
         # Avoid unnecessary copy if we only add columns
         result = df.copy()
@@ -987,11 +1068,12 @@ class FeatureEngineering:
                 result[cov_column] = 0.0
                 continue
 
-            # Calculate mean and std directly
-            stats_df = (
-                df.loc[non_zero_train_mask]
-                .groupby(group_columns)[value_column]
-                .agg(["mean", "std"])
+            # Calculate CV with seasonality and trend removal
+            stats_df = self._calculate_cov_with_decomposition(
+                df.loc[non_zero_train_mask], 
+                group_columns, 
+                value_column, 
+                date_col
             )
 
             # Some groups might have only one value or constant values, resulting in NaN std
@@ -1017,6 +1099,83 @@ class FeatureEngineering:
 
             # Fill NaN values with 0 and ensure proper data type
             result[cov_column] = result[cov_column].fillna(0).astype("float64")
+
+        return result
+
+    def create_intermittence(self, df, group_columns, value_columns):
+        """
+        Calculate the intermittence (percentage of rows with NA or 0) for multiple value columns 
+        within each group, using only rows where 'sample' equals 'train'.
+
+        Parameters:
+        -----------
+        df : pd.DataFrame
+            Input DataFrame containing the group and value columns.
+        group_columns : list
+            List of columns to group by (e.g., ['client', 'warehouse', 'product']).
+        value_columns : list or str
+            List of value columns for which to calculate intermittence (e.g., ['sales', 'price']).
+            Can also be a single column name as a string (e.g., 'sales').
+
+        Returns:
+        --------
+        pd.DataFrame
+            DataFrame with additional intermittence columns for each value column, 
+            joined back to the full DataFrame.
+        """
+        # Avoid unnecessary copy if we only add columns
+        result = df.copy()
+
+        # Standardize inputs
+        group_columns = (
+            [group_columns] if isinstance(group_columns, str) else group_columns
+        )
+        value_columns = (
+            [value_columns] if isinstance(value_columns, str) else value_columns
+        )
+
+        # Validate input types
+        if not isinstance(group_columns, list):
+            raise ValueError("group_columns must be a list or a string.")
+        if not isinstance(value_columns, list):
+            raise ValueError("value_columns must be a list or a string.")
+
+        # Create a mask for train data
+        train_mask = df["sample"] == "train"
+
+        # Process all value columns
+        for value_column in value_columns:
+            if value_column not in df.columns:
+                print(f"Warning: Column '{value_column}' not found in the DataFrame.")
+                continue
+
+            # Calculate intermittence for train data only
+            train_data = df.loc[train_mask]
+            
+            if len(train_data) == 0:  # No train data
+                # Create empty column with zeros
+                intermittence_column = f"feature_{value_column}_intermittence"
+                result[intermittence_column] = 0.0
+                continue
+
+            # Calculate intermittence (percentage of NA or 0 values) for each group
+            intermittence_stats = (
+                train_data.groupby(group_columns)[value_column]
+                .apply(lambda x: ((x.isna()) | (x == 0)).sum() / len(x) * 100)
+                .reset_index()
+            )
+
+            # Rename the column
+            intermittence_column = f"feature_{value_column}_intermittence"
+            intermittence_stats = intermittence_stats.rename(columns={value_column: intermittence_column})
+
+            # Merge with original DataFrame using an efficient left join
+            result = result.merge(
+                intermittence_stats, on=group_columns, how="left"
+            )
+
+            # Fill NaN values with 0 and ensure proper data type
+            result[intermittence_column] = result[intermittence_column].fillna(0).astype("float64")
 
         return result
 
@@ -1239,166 +1398,6 @@ class FeatureEngineering:
 
         return result
 
-    # Create history clusters
-    def create_history_clusters(self, df, group_columns, value_columns, n_groups=10):
-        """
-        Create quantile clusters for multiple value columns based on their max values within each group,
-        excluding zeros from the calculation and only using rows where 'sample' equals 'train'.
-
-        Parameters:
-        df (pd.DataFrame): Input DataFrame containing the group and value columns.
-        group_columns (list): List of columns to group by (e.g., ['client', 'warehouse', 'product']).
-        value_columns (list): List of value columns for which to create clusters (e.g., ['sales', 'price']).
-        n_groups (int): Number of quantile groups to create for each value column (default is 4 for quartiles).
-
-        Returns:
-        pd.DataFrame: DataFrame with additional cluster columns for each value column, joined back to the full DataFrame.
-        """
-        # Copy the input DataFrame
-        result = df.copy()
-
-        # Ensure group_columns is a list
-        if isinstance(group_columns, str):
-            group_columns = [group_columns]
-        elif not isinstance(group_columns, list):
-            raise ValueError("group_columns must be a list or a string.")
-
-        # Ensure value_columns is a list
-        if isinstance(value_columns, str):
-            value_columns = [value_columns]
-        elif not isinstance(value_columns, list):
-            raise ValueError("value_columns must be a list or a string.")
-
-        # Filter only for rows where sample is 'train'
-        train_data = df[df["sample"] == "train"]
-
-        for value_column in value_columns:
-            # Exclude zero values and calculate the max for each group using the 'train' sample only
-            max_values = (
-                train_data.groupby(group_columns)[value_column].max().reset_index()
-            )
-
-            # Create quantile clusters based on the max values
-            cluster_column = f"feature_{value_column}_history_cluster"
-
-            # Use `pd.qcut` to create quantiles and convert them to integers
-            max_values[cluster_column] = (
-                pd.qcut(
-                    max_values[value_column],
-                    q=n_groups,
-                    duplicates="drop",
-                    labels=False,
-                )
-                + 1
-            )
-
-            # Ensure that the cluster column is of integer type
-            max_values[cluster_column] = (
-                max_values[cluster_column].fillna(0).astype(int)
-            )
-
-            # Merge the clusters back into the original DataFrame (result), keeping all original rows
-            result = result.merge(
-                max_values[group_columns + [cluster_column]],
-                on=group_columns,
-                how="left",
-            )
-
-            # Ensure the cluster column in the result DataFrame is an integer type
-            result[cluster_column] = result[cluster_column].fillna(0).astype(int)
-
-        return result
-
-    # Create intermittence clusters
-    def create_intermittence_clusters(
-        self, df, group_columns, value_columns, n_groups=10
-    ):
-        """
-        Create quantile clusters for each group based on the intermittence of multiple value columns.
-        Intermittence is defined as the number of zero values divided by the total
-        number of dates, excluding leading zeros, for each value column.
-
-        Parameters:
-        df (pd.DataFrame): Input DataFrame containing the group and value columns.
-        group_columns (list): List of columns to group by (e.g., ['client', 'warehouse', 'product']).
-        value_columns (list): List of value columns where zeros are evaluated for intermittence.
-        n_groups (int): Number of quantile groups to create for the intermittence (default is 10).
-
-        Returns:
-        pd.DataFrame: DataFrame with additional intermittence cluster columns for each value column,
-                      joined back to the full DataFrame.
-        """
-        # Copy the input DataFrame
-        result = df.copy()
-
-        # Ensure group_columns is a list
-        if isinstance(group_columns, str):
-            group_columns = [group_columns]
-        elif not isinstance(group_columns, list):
-            raise ValueError("group_columns must be a list or a string.")
-
-        # Ensure value_columns is a list
-        if isinstance(value_columns, str):
-            value_columns = [value_columns]
-        elif not isinstance(value_columns, list):
-            raise ValueError("value_columns must be a list or a string.")
-
-        # Function to calculate intermittence for a given column
-        def calculate_intermittence(group, column):
-            # Remove leading zeros
-            non_zero_start_idx = (group[column] != 0).idxmax()
-            trimmed_group = group.loc[non_zero_start_idx:]
-
-            # Calculate intermittence: proportion of zero values after leading zeros
-            zero_dates = (trimmed_group[column] == 0).sum()
-            total_dates = trimmed_group.shape[0]
-
-            # If no dates or all leading zeros were trimmed, intermittence is 0
-            return zero_dates / total_dates if total_dates > 0 else 0
-
-        # Filter only for rows where sample is 'train'
-        train_data = df[df["sample"] == "train"]
-
-        # Loop by value column
-        for value_column in value_columns:
-            # Calculate intermittence for each group for the current value column
-            intermittence_values = (
-                train_data.groupby(group_columns)
-                .apply(lambda group: calculate_intermittence(group, value_column))
-                .reset_index(name=f"intermittence_{value_column}")
-            )
-
-            # Create new name for intermittence cluster
-            cluster_name = f"feature_intermittence_{value_column}_cluster"
-
-            # Create quantile clusters based on the intermittence for the current value column
-            intermittence_values[cluster_name] = (
-                pd.qcut(
-                    intermittence_values[f"intermittence_{value_column}"],
-                    q=n_groups,
-                    duplicates="drop",
-                    labels=False,
-                )
-                + 1
-            )
-
-            # Ensure that the cluster column is of integer type
-            intermittence_values[cluster_name] = (
-                intermittence_values[cluster_name].fillna(0).astype(int)
-            )
-
-            # Merge the intermittence clusters back into the original DataFrame (result), keeping all original rows
-            result = result.merge(
-                intermittence_values[group_columns + [cluster_name]],
-                on=group_columns,
-                how="left",
-            )
-
-            # Ensure the cluster column in the result DataFrame is an integer type
-            result[cluster_name] = result[cluster_name].fillna(0).astype(int)
-
-        return result
-
     # Create train weights
     def create_train_weights(
         self,
@@ -1472,8 +1471,8 @@ class FeatureEngineering:
 
         return df_copy
 
-    # Create forecast lag number
-    def create_fcst_lag_number(
+    # Create horizon number
+    def create_horizon_number(
         self,
         df,
         group_columns,
@@ -1482,7 +1481,7 @@ class FeatureEngineering:
         target_sample="test",
     ):
         """
-        Adds a column `fcst_lag` to the DataFrame that counts rows from 1 for each occurrence of `sample = target_sample`
+        Adds a column `horizon` to the DataFrame that counts rows from 1 for each occurrence of `sample = target_sample`
         within groups defined by `group_columns`. The count starts from the first occurrence of `sample = target_sample` in
         each group, and all prior rows are set to NaN.
 
@@ -1502,7 +1501,7 @@ class FeatureEngineering:
         Returns:
         --------
         pd.DataFrame
-            The DataFrame with an added `fcst_lag` column as integer.
+            The DataFrame with an added `horizon` column as integer.
         """
         # Ensure group_columns is a list
         if isinstance(group_columns, str):
@@ -1513,23 +1512,23 @@ class FeatureEngineering:
         # Sort DataFrame by group columns and date
         df = df.sort_values(by=group_columns + [date_col]).copy()
 
-        # Auxiliary forecast lag function
-        def apply_fcst_lag(group):
+        # Auxiliary horizon function
+        def apply_horizon(group):
             start_index = group.index[group[sample_col] == target_sample]
             if len(start_index) == 0:
-                group["fcst_lag"] = np.nan
+                group["horizon"] = np.nan
             else:
                 first_test_index = start_index[0]
-                # Use range with integers for fcst_lag
-                group.loc[first_test_index:, "fcst_lag"] = range(
+                # Use range with integers for horizon
+                group.loc[first_test_index:, "horizon"] = range(
                     1, len(group.loc[first_test_index:]) + 1
                 )
                 if first_test_index > group.index[0]:
-                    group.loc[: first_test_index - 1, "fcst_lag"] = np.nan
+                    group.loc[: first_test_index - 1, "horizon"] = np.nan
             return group
 
-        # Initialize fcst_lag column with NaN
-        df["fcst_lag"] = np.nan
+        # Initialize horizon column with NaN
+        df["horizon"] = np.nan
 
         # Process each group separately instead of using groupby.apply
         for group_name, group_df in df.groupby(group_columns):
@@ -1541,11 +1540,11 @@ class FeatureEngineering:
 
             if len(start_indices) > 0:
                 first_test_index = start_indices[0]
-                # Calculate lag numbers for this group
+                # Calculate horizon numbers for this group
                 test_indices = group_df.loc[first_test_index:].index
-                df.loc[test_indices, "fcst_lag"] = range(1, len(test_indices) + 1)
+                df.loc[test_indices, "horizon"] = range(1, len(test_indices) + 1)
 
         # Cast to integer after filling NaN
-        df["fcst_lag"] = df["fcst_lag"].fillna(0).astype(int)
+        df["horizon"] = df["horizon"].fillna(0).astype(int)
 
         return df

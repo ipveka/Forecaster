@@ -83,6 +83,16 @@ def create_single_axis_plot(
                 label="Final Prediction", color="#06A77D", linewidth=2, 
                 linestyle="--", alpha=0.9, zorder=3)
     
+    # Plot prediction_ensemble (if exists) - smart ensemble prediction
+    if "prediction_ensemble" in df.columns and len(post_cutoff) > 0:
+        # Connect last pre-cutoff point to first post-cutoff point
+        connection_df = pd.concat([pre_cutoff.tail(1), post_cutoff])
+        ax.plot(connection_df[date_col], connection_df["prediction_ensemble"], 
+                color="#8B5CF6", linewidth=2.5, linestyle="-", alpha=0.8, zorder=4)
+        ax.plot(post_cutoff[date_col], post_cutoff["prediction_ensemble"], 
+                label="Smart Ensemble", color="#8B5CF6", linewidth=2.5, 
+                linestyle="-", alpha=0.8, zorder=4)
+    
     # Plot baseline
     ax.plot(df[date_col], df[baseline_col], label="Baseline", 
             color="#D62828", linewidth=1.8, linestyle=":", 
@@ -198,6 +208,10 @@ def process_and_plot(
             # Add model_prediction to aggregation if it exists
             if "model_prediction" in df_cutoff.columns:
                 agg_dict["model_prediction"] = "sum"
+            
+            # Add prediction_ensemble to aggregation if it exists
+            if "prediction_ensemble" in df_cutoff.columns:
+                agg_dict["prediction_ensemble"] = "sum"
             
             df_grouped = (
                 df_cutoff.groupby(date_col)

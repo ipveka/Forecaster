@@ -381,30 +381,51 @@ class CreateBaselines:
 
     # LR Baseline
     def create_lr_baseline(
-        self, df, group_cols, date_col, signal_cols, feature_cols, debug=False
+        self, df, group_cols, date_col, signal_cols, feature_cols, create_features=False, debug=False
     ):
         """
-        Add linear regression (LR) baselines and feature baselines for each signal column to the test set.
+        Add linear regression (LR) baselines for each signal column, and optionally feature baselines.
         For the train set, store the actual values in the baseline columns.
 
         Parameters:
-        df (pd.DataFrame): The input DataFrame with columns 'client', 'warehouse', 'product', 'date', 'sales', 'price',
-                           'filled_sales', 'filled_price', and 'sample'.
-        group_cols (list): The list of columns to group by (e.g., ['client', 'warehouse', 'product']).
-        date_col (str): The name of the date column.
-        signal_cols (list): The list of signal columns to predict using linear regression.
-        feature_cols (list): The list of feature columns to use for training the linear regression model.
+        -----------
+        df : pd.DataFrame
+            The input DataFrame with columns like 'client', 'warehouse', 'product', 'date', 'sales', 'price',
+            'filled_sales', 'filled_price', and 'sample'.
+        group_cols : list
+            The list of columns to group by (e.g., ['client', 'warehouse', 'product']).
+        date_col : str
+            The name of the date column.
+        signal_cols : str or list
+            The signal column(s) to use for calculating the baselines.
+            Can be a single column name (str) or a list of column names.
+        feature_cols : list
+            The list of feature columns to use for training the linear regression model.
+        create_features : bool, optional (default=False)
+            If True, also create `feature_baseline_*` columns.
+            If False, only create `baseline_*` columns.
+        debug : bool, optional (default=False)
+            Whether to print debug information.
 
         Returns:
-        pd.DataFrame: A DataFrame with additional columns: 'baseline_{signal_col}_lr' and 'feature_baseline_{signal_col}_lr'
-                      for each signal column.
+        --------
+        pd.DataFrame
+            A DataFrame with additional columns:
+            - Always:  'baseline_{signal_col}_lr'
+            - If True: 'feature_baseline_{signal_col}_lr'
         """
+        # Ensure signal_cols is a list
+        if isinstance(signal_cols, str):
+            signal_cols = [signal_cols]
+        else:
+            signal_cols = list(signal_cols)
+
         # Sort the data by the group columns and the date column for proper ordering
         df = df.sort_values(by=group_cols + [date_col])
 
         # Split the data into training and test sets
-        train_df = df[df["sample"] == "train"]
-        test_df = df[df["sample"] == "test"]
+        train_df = df[df["sample"] == "train"].copy()
+        test_df = df[df["sample"] == "test"].copy()
 
         # Initialize the linear regression model
         lr_model = LinearRegression()
@@ -415,7 +436,10 @@ class CreateBaselines:
 
             # For the training set, store the actual signal values in the baseline columns
             train_df[f"baseline_{signal_col}_lr"] = train_df[signal_col]
-            train_df[f"feature_baseline_{signal_col}_lr"] = train_df[signal_col]
+            
+            # Create feature columns only if create_features is True
+            if create_features:
+                train_df[f"feature_baseline_{signal_col}_lr"] = train_df[signal_col]
 
             # Track the total number of groups for progress updates
             total_groups = len(train_df.groupby(group_cols))
@@ -449,7 +473,10 @@ class CreateBaselines:
 
                         # Store the predictions in the test DataFrame for this signal
                         group_test[f"baseline_{signal_col}_lr"] = preds
-                        group_test[f"feature_baseline_{signal_col}_lr"] = preds
+                        
+                        # Create feature columns only if create_features is True
+                        if create_features:
+                            group_test[f"feature_baseline_{signal_col}_lr"] = preds
 
                         # Append the group test results to the list of predictions
                         baseline_preds.append(group_test)
@@ -471,29 +498,51 @@ class CreateBaselines:
 
     # LGBM Baseline
     def create_lgbm_baseline(
-        self, df, group_cols, date_col, signal_cols, feature_cols, debug=False
+        self, df, group_cols, date_col, signal_cols, feature_cols, create_features=False, debug=False
     ):
         """
-        Add LightGBM regression baselines and feature baselines for each signal column to the test set.
+        Add LightGBM regression baselines for each signal column, and optionally feature baselines.
         For the train set, store the actual values in the baseline columns.
 
         Parameters:
-        df (pd.DataFrame): The input DataFrame
-        group_cols (list): The list of columns to group by (e.g., ['client', 'warehouse', 'product']).
-        date_col (str): The name of the date column.
-        signal_cols (list): The list of signal columns to predict using LightGBM.
-        feature_cols (list): The list of feature columns to use for training the regression model.
+        -----------
+        df : pd.DataFrame
+            The input DataFrame with columns like 'client', 'warehouse', 'product', 'date', 'sales', 'price',
+            'filled_sales', 'filled_price', and 'sample'.
+        group_cols : list
+            The list of columns to group by (e.g., ['client', 'warehouse', 'product']).
+        date_col : str
+            The name of the date column.
+        signal_cols : str or list
+            The signal column(s) to use for calculating the baselines.
+            Can be a single column name (str) or a list of column names.
+        feature_cols : list
+            The list of feature columns to use for training the regression model.
+        create_features : bool, optional (default=False)
+            If True, also create `feature_baseline_*` columns.
+            If False, only create `baseline_*` columns.
+        debug : bool, optional (default=False)
+            Whether to print debug information.
 
         Returns:
-        pd.DataFrame: A DataFrame with additional columns: 'baseline_{signal_col}_lgbm' and 'feature_baseline_{signal_col}_lgbm'
-                      for each signal column.
+        --------
+        pd.DataFrame
+            A DataFrame with additional columns:
+            - Always:  'baseline_{signal_col}_lgbm'
+            - If True: 'feature_baseline_{signal_col}_lgbm'
         """
+        # Ensure signal_cols is a list
+        if isinstance(signal_cols, str):
+            signal_cols = [signal_cols]
+        else:
+            signal_cols = list(signal_cols)
+
         # Sort the data for consistency
         df = df.sort_values(by=group_cols + [date_col])
 
         # Split the data into training and test sets
-        train_df = df[df["sample"] == "train"]
-        test_df = df[df["sample"] == "test"]
+        train_df = df[df["sample"] == "train"].copy()
+        test_df = df[df["sample"] == "test"].copy()
 
         # Iterate over each signal column to train separate LightGBM models
         for signal_col in signal_cols:
@@ -505,7 +554,10 @@ class CreateBaselines:
 
             # Store the actual signal values for the train set
             train_df[f"baseline_{signal_col}_lgbm"] = train_df[signal_col]
-            train_df[f"feature_baseline_{signal_col}_lgbm"] = train_df[signal_col]
+            
+            # Create feature columns only if create_features is True
+            if create_features:
+                train_df[f"feature_baseline_{signal_col}_lgbm"] = train_df[signal_col]
 
             # Loop through each group to train the LightGBM model individually
             for group_counter, (group_values, group_train) in enumerate(
@@ -542,7 +594,10 @@ class CreateBaselines:
 
                         # Store the predictions in the test DataFrame
                         group_test[f"baseline_{signal_col}_lgbm"] = preds
-                        group_test[f"feature_baseline_{signal_col}_lgbm"] = preds
+                        
+                        # Create feature columns only if create_features is True
+                        if create_features:
+                            group_test[f"feature_baseline_{signal_col}_lgbm"] = preds
 
                         # Append the group test results to the list of predictions
                         baseline_preds.append(group_test)
