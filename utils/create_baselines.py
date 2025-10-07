@@ -44,6 +44,7 @@ class CreateBaselines:
         bs_window_size=None,
         feature_cols=None,
         freq=None,
+        create_features=False,
     ):
         """
         Main function to prepare baselines by calling specified baseline functions in order.
@@ -53,9 +54,10 @@ class CreateBaselines:
         group_cols (list): Columns to group the data (e.g., ['client', 'warehouse', 'product'])
         date_col (str): Column containing dates
         signal_cols (list): List of signal columns to create baselines for
-        baseline_types (list): List of baseline types to create ('MA' for moving average, 'LR' for linear regression, 'ML' for LightGBM)
+        baseline_types (list): List of baseline types to create ('MA' for moving average, 'LR' for linear regression, 'ML' for LightGBM, 'CROSTON' for Croston method)
         bs_window_size (int): Window size for moving average baseline (default: 13)
         feature_cols (list): Feature columns for regression models (required for 'LR' and 'ML' baseline types)
+        create_features (bool): Whether to create feature_baseline_* columns in addition to baseline_* columns (default: False)
 
         Returns:
         pd.DataFrame: Prepared DataFrame with baseline columns added
@@ -119,7 +121,7 @@ class CreateBaselines:
                 print(f"   • Signals: {len(signal_cols)}")
                 
                 result_df = self.create_ma_baseline(
-                    result_df, group_cols, date_col, signal_cols, bs_window_size
+                    result_df, group_cols, date_col, signal_cols, bs_window_size, create_features
                 )
                 
                 cols_added = len(result_df.columns) - cols_before
@@ -136,7 +138,7 @@ class CreateBaselines:
                 print(f"   • Training per group...")
                 
                 result_df = self.create_lr_baseline(
-                    result_df, group_cols, date_col, signal_cols, feature_cols
+                    result_df, group_cols, date_col, signal_cols, feature_cols, create_features
                 )
                 
                 cols_added = len(result_df.columns) - cols_before
@@ -154,13 +156,30 @@ class CreateBaselines:
                 print(f"   • Model: n_estimators=1000, learning_rate=0.05")
                 
                 result_df = self.create_lgbm_baseline(
-                    result_df, group_cols, date_col, signal_cols, feature_cols
+                    result_df, group_cols, date_col, signal_cols, feature_cols, create_features
                 )
                 
                 cols_added = len(result_df.columns) - cols_before
                 print(f"   ✓ Created {cols_added} baseline column(s)")
                 for signal in signal_cols:
                     baseline_col = f"baseline_{signal}_lgbm"
+                    baselines_created.append(baseline_col)
+                    print(f"      - {baseline_col}")
+
+            elif baseline_type == "CROSTON":
+                print(f"   📊 Type: Croston Method")
+                print(f"   • Signals: {len(signal_cols)}")
+                print(f"   • Alpha: 0.1 (smoothing parameter)")
+                print(f"   • Method: Intermittent demand forecasting")
+                
+                result_df = self.create_croston_baseline(
+                    result_df, group_cols, date_col, signal_cols, alpha=0.1, create_features=create_features
+                )
+                
+                cols_added = len(result_df.columns) - cols_before
+                print(f"   ✓ Created {cols_added} baseline column(s)")
+                for signal in signal_cols:
+                    baseline_col = f"baseline_{signal}_croston"
                     baselines_created.append(baseline_col)
                     print(f"      - {baseline_col}")
 

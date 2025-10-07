@@ -233,6 +233,7 @@ class Evaluator:
     def create_metric_table(self):
         """
         Create a DataFrame for the evaluation metrics, with values rounded to 2 decimal places.
+        Columns are ordered with baseline first, followed by prediction columns in the order provided.
 
         :return: A pandas DataFrame summarizing the metrics for baseline and all predictions
         """
@@ -240,6 +241,20 @@ class Evaluator:
 
         # Creating a DataFrame from the metrics dictionary
         metric_table = pd.DataFrame(metrics)
+
+        # The DataFrame has metrics as columns and model names as index
+        # We want to reorder the INDEX (model names), not the columns
+        # Create a list of model names in the desired order: baseline first, then preds_cols in order
+        model_order = [self.baseline_col] + self.preds_cols
+        existing_models = [model for model in model_order if model in metric_table.index]
+        
+        # Debug: Show what models were found vs expected
+        if len(existing_models) != len(model_order):
+            print(f"Warning: Expected models {model_order}, but found {list(metric_table.index)}")
+        
+        # Reorder the index to match the desired order (only if models exist)
+        if existing_models:
+            metric_table = metric_table.reindex(existing_models)
 
         # Round all numeric values to 2 decimal places
         metric_table = metric_table.round(2)
@@ -306,7 +321,7 @@ class Evaluator:
 
             # Calculate baseline metrics
             baseline_predictions = group_data[self.baseline_col].values
-            current_row["baseline"] = self._calculate_metric(
+            current_row[self.baseline_col] = self._calculate_metric(
                 metric_name, group_actuals, baseline_predictions
             )
 
@@ -328,6 +343,13 @@ class Evaluator:
 
         # Transpose to have models as rows and group_col values as columns
         result_df = result_df.transpose()
+
+        # Reorder columns to match the desired order: baseline first, then preds_cols in order
+        model_order = [self.baseline_col] + self.preds_cols
+        # Only reorder if all models exist in the DataFrame
+        existing_models = [model for model in model_order if model in result_df.columns]
+        if existing_models:
+            result_df = result_df[existing_models]
 
         # Round all values to 2 decimals
         result_df = result_df.round(2)

@@ -122,10 +122,13 @@ class ForecastRequest(BaseModel):
 
     # Baseline parameters
     baseline_types: List[str] = Field(
-        ["MA"], description="Types of baselines to create"
+        ["MA"], description="Types of baselines to create (MA, LR, ML, CROSTON)"
     )
     bs_window_size: int = Field(
         13, description="Window size for moving average baseline"
+    )
+    create_features: bool = Field(
+        False, description="Whether to create feature_baseline_* columns"
     )
 
     # Forecaster parameters
@@ -245,6 +248,7 @@ async def forecast(request: ForecastRequest, authorized: bool = Depends(get_api_
             # Baseline parameters
             baseline_types=request.baseline_types,
             bs_window_size=request.bs_window_size,
+            create_features=request.create_features,
             # Forecaster parameters
             training_group=request.training_group,
             model=request.model,
