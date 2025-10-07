@@ -91,8 +91,9 @@ class Runner:
         fill_lags=False,  # Whether to fill forward lags
         n_clusters=10,  # Number of groups for quantile clustering
         # Baseline parameters
-        baseline_types=["MA", "LR", "ML"],  # Types of baselines to create
+        baseline_types=["MA", "LR", "ML", "CROSTON"],  # Types of baselines to create
         bs_window_size=13,  # Window size for moving average baseline
+        create_features=False,  # Whether to create feature_baseline_* columns
         # Forecaster parameters
         training_group=None,  # Column to use for training groups
         model="LGBM",  # Model to use for forecasting
@@ -231,6 +232,7 @@ class Runner:
             signal_cols=[target],
             baseline_types=baseline_types,
             bs_window_size=bs_window_size,
+            create_features=create_features,
         )
 
         # Log completion of baseline creation step
