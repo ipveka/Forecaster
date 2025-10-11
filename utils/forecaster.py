@@ -935,6 +935,10 @@ class Forecaster:
             1.0
         )
         
+        # Ensure ratio is never exactly 0 to avoid division by zero in scaling factor
+        # Replace 0 with 1.0 (no scaling needed for zero predictions)
+        ratio = np.where(ratio == 0, 1.0, ratio)
+        
         # Determine if guardrail should be applied
         # Guardrail triggers if ratio > guardrail_limit OR ratio < 1/guardrail_limit
         upper_limit_exceeded = ratio > guardrail_limit
@@ -945,6 +949,7 @@ class Forecaster:
         # If upper limit exceeded: scale down to guardrail_limit
         # If lower limit exceeded: scale up to 1/guardrail_limit
         # Otherwise: no scaling (factor = 1)
+        # Safe division since we've ensured ratio is never 0
         scaling_factor = np.where(
             upper_limit_exceeded,
             guardrail_limit / ratio,

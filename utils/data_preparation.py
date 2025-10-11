@@ -745,7 +745,6 @@ class DataPreparation:
         train_mask = df["sample"] == "train"
         test_mask = (df["sample"] == "test") & (df["horizon"] <= horizon_param)
         filter_mask = train_mask | test_mask
-        
         filtered_df = df[filter_mask].copy()
 
         # Calculate statistics after filtering
