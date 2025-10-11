@@ -184,6 +184,19 @@ class DataPreparation:
         df["cutoff"] = pd.to_datetime(df["cutoff"])
         print(f"   ✓ Converted cutoff column to datetime")
 
+        # Create horizon numbers
+        print(f"\n🔢 Creating horizon numbers...")
+        df = self.create_horizon_number(df, group_cols, date_col)
+        print(f"   ✓ Created 'horizon' column")
+        print(f"      - Tracks forecast horizon position")
+
+        # Apply horizon filtering if horizon parameter is provided
+        if horizon is not None:
+            df = self.filter_by_horizon(df, horizon, group_cols)
+
+        # Reset index
+        df = df.reset_index(drop=True)
+
         # Final summary
         print(f"\n" + "=" * 70)
         print(f"✅ DATA PREPARATION COMPLETED")
@@ -192,6 +205,8 @@ class DataPreparation:
         print(f"   • Cutoffs: {n_cutoffs}")
         print(f"   • Horizon: {horizon} periods")
         print(f"   • Frequency: {freq}")
+        if horizon is not None:
+            print(f"   • Horizon filtering: <= {horizon}")
         print("=" * 70 + "\n")
         
         return df
@@ -610,3 +625,161 @@ class DataPreparation:
                 ).infer_objects(copy=False)
 
         return result
+
+    # Create horizon number
+    def create_horizon_number(
+        self,
+        df,
+        group_columns,
+        date_col="date",
+        sample_col="sample",
+        target_sample="test",
+    ):
+        """
+        Adds a column `horizon` to the DataFrame that counts rows from 1 for each occurrence of `sample = target_sample`
+        within groups defined by `group_columns` + `cutoff`. The count starts from the first occurrence of `sample = target_sample` in
+        each group per cutoff, and all prior rows are set to 0.
+
+        Parameters:
+        -----------
+        df : pd.DataFrame
+            The DataFrame containing data to process.
+        group_columns : list
+            Columns to group by, e.g., ['client', 'warehouse', 'product'].
+        date_col : str, optional
+            Column to order rows by within each group. Default is 'date'.
+        sample_col : str, optional
+            Column that identifies the target sample, e.g., 'sample'.
+        target_sample : str, optional
+            Value within `sample_col` to start counting from. Default is 'test'.
+
+        Returns:
+        --------
+        pd.DataFrame
+            The DataFrame with an added `horizon` column as integer.
+        """
+        # Ensure group_columns is a list
+        if isinstance(group_columns, str):
+            group_columns = [group_columns]
+        elif not isinstance(group_columns, list):
+            raise ValueError("group_columns must be a list or a string.")
+
+        # Add cutoff to group columns for proper horizon calculation per cutoff
+        horizon_group_cols = group_columns + ["cutoff"]
+
+        # Sort DataFrame by group columns and date
+        df = df.sort_values(by=horizon_group_cols + [date_col]).copy()
+
+        # Initialize horizon column with 0
+        df["horizon"] = 0
+
+        # Process each group separately (per group per cutoff)
+        for group_name, group_df in df.groupby(horizon_group_cols):
+            # Find test rows in this group
+            test_mask = group_df[sample_col] == target_sample
+            test_indices = group_df.index[test_mask]
+
+            if len(test_indices) > 0:
+                # Calculate horizon numbers for test rows in this group
+                df.loc[test_indices, "horizon"] = range(1, len(test_indices) + 1)
+
+        # Ensure horizon column is integer
+        df["horizon"] = df["horizon"].astype(int)
+
+        return df
+
+    # Filter by horizon
+    def filter_by_horizon(self, df, horizon_param, group_cols):
+        """
+        Filter the DataFrame to only include rows where horizon <= horizon_param.
+        This is useful for limiting the forecast horizon to a specific number of periods.
+
+        Parameters:
+        -----------
+        df : pd.DataFrame
+            Input DataFrame with horizon column
+        horizon_param : int
+            Maximum horizon value to keep (inclusive)
+        group_cols : list
+            Columns to group by for statistics
+
+        Returns:
+        --------
+        pd.DataFrame
+            Filtered DataFrame with horizon <= horizon_param
+        """
+        # Check if horizon column exists
+        if "horizon" not in df.columns:
+            print("⚠️  Warning: 'horizon' column not found. Returning original DataFrame.")
+            return df
+
+        # Print statistics before filtering
+        print(f"\n🔍 Filtering by horizon <= {horizon_param}...")
+        
+        # Calculate statistics before filtering
+        total_rows_before = len(df)
+        test_rows_before = len(df[df["sample"] == "test"])
+        train_rows_before = len(df[df["sample"] == "train"])
+        
+        # Calculate median rows per cutoff by group_cols
+        train_stats_before = df[df["sample"] == "train"].groupby(["cutoff"] + group_cols).size().groupby("cutoff").median()
+        test_stats_before = df[df["sample"] == "test"].groupby(["cutoff"] + group_cols).size().groupby("cutoff").median()
+        
+        print(f"   📊 Before filtering:")
+        print(f"      • Total rows: {total_rows_before:,}")
+        print(f"      • Train rows: {train_rows_before:,}")
+        print(f"      • Test rows: {test_rows_before:,}")
+        
+        if len(train_stats_before) > 0:
+            print(f"      • Median train rows per group by cutoff:")
+            for cutoff, median_rows in train_stats_before.items():
+                print(f"        - Cutoff {cutoff.date()}: {median_rows:.0f} rows")
+        
+        if len(test_stats_before) > 0:
+            print(f"      • Median test rows per group by cutoff:")
+            for cutoff, median_rows in test_stats_before.items():
+                print(f"        - Cutoff {cutoff.date()}: {median_rows:.0f} rows")
+
+        # Apply filtering
+        # Keep all train rows and test rows where horizon <= horizon_param
+        train_mask = df["sample"] == "train"
+        test_mask = (df["sample"] == "test") & (df["horizon"] <= horizon_param)
+        filter_mask = train_mask | test_mask
+        filtered_df = df[filter_mask].copy()
+
+        # Calculate statistics after filtering
+        total_rows_after = len(filtered_df)
+        test_rows_after = len(filtered_df[filtered_df["sample"] == "test"])
+        train_rows_after = len(filtered_df[filtered_df["sample"] == "train"])
+        
+        # Calculate median rows per cutoff by group_cols after filtering
+        train_stats_after = filtered_df[filtered_df["sample"] == "train"].groupby(["cutoff"] + group_cols).size().groupby("cutoff").median()
+        test_stats_after = filtered_df[filtered_df["sample"] == "test"].groupby(["cutoff"] + group_cols).size().groupby("cutoff").median()
+        
+        print(f"   📊 After filtering:")
+        print(f"      • Total rows: {total_rows_after:,}")
+        print(f"      • Train rows: {train_rows_after:,}")
+        print(f"      • Test rows: {test_rows_after:,}")
+        
+        if len(train_stats_after) > 0:
+            print(f"      • Median train rows per group by cutoff:")
+            for cutoff, median_rows in train_stats_after.items():
+                print(f"        - Cutoff {cutoff.date()}: {median_rows:.0f} rows")
+        
+        if len(test_stats_after) > 0:
+            print(f"      • Median test rows per group by cutoff:")
+            for cutoff, median_rows in test_stats_after.items():
+                print(f"        - Cutoff {cutoff.date()}: {median_rows:.0f} rows")
+        
+        # Show reduction statistics
+        rows_removed = total_rows_before - total_rows_after
+        test_rows_removed = test_rows_before - test_rows_after
+        reduction_pct = (rows_removed / total_rows_before) * 100 if total_rows_before > 0 else 0
+        
+        print(f"   📉 Filtering results:")
+        print(f"      • Rows removed: {rows_removed:,} ({reduction_pct:.1f}%)")
+        print(f"      • Test rows removed: {test_rows_removed:,}")
+        
+        print(f"   ✓ Horizon filtering completed")
+        
+        return filtered_df
