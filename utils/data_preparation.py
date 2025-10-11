@@ -103,7 +103,6 @@ class DataPreparation:
 
         # Get frequency-specific parameters
         from utils.forecaster_utils import get_frequency_params
-
         freq_params = get_frequency_params(freq)
 
         # Use frequency-specific parameters if not provided by user
@@ -122,6 +121,7 @@ class DataPreparation:
         # Complete logic
         if complete_dataframe:
             print(f"\n🔧 Filling missing dates for each group...")
+            print(f"   • Using frequency: {freq}")
             rows_before = len(df)
             df = self.complete(df, group_cols, date_col, freq)
             rows_after = len(df)
@@ -168,14 +168,14 @@ class DataPreparation:
         print(f"   ✓ Train samples: {train_rows:,} ({train_rows/rows_after*100:.1f}%)")
         print(f"   ✓ Test samples: {test_rows:,} ({test_rows/rows_after*100:.1f}%)")
 
-        # Add horizon for last cutoff
-        print(f"\n🎯 Adding forecast horizon for latest cutoff...")
+        # Add horizon for all cutoffs
+        print(f"\n🎯 Adding forecast horizon for all cutoffs...")
         rows_before = len(df)
         df = self.add_horizon_last_cutoff(df, group_cols, date_col, horizon, freq)
         rows_after = len(df)
         rows_added = rows_after - rows_before
         if rows_added > 0:
-            print(f"   ✓ Added {rows_added:,} rows for {horizon}-period forecast horizon")
+            print(f"   ✓ Added {rows_added:,} rows for {horizon}-period forecast horizon across all cutoffs")
         else:
             print(f"   ✓ Horizon already complete (no rows added)")
 
@@ -299,34 +299,65 @@ class DataPreparation:
 
         Parameters:
         df (pd.DataFrame): The original DataFrame.
-        group_cols (list): List of columns to group by (e.g. ['client', 'warehouse', 'product']).
+        group_cols (list or str): Column(s) to group by (e.g. ['client', 'warehouse', 'product']).
         date_col (str): The name of the date column.
         freq (str): Frequency string for the date range (e.g., 'W-MON' for weekly on Mondays).
 
         Returns:
         pd.DataFrame: The completed DataFrame with all required date ranges for each group.
         """
+        # Ensure group_cols is a list
+        if isinstance(group_cols, str):
+            group_cols = [group_cols]
+        
         # Ensure the date column is in datetime format
         df[date_col] = pd.to_datetime(df[date_col])
+        
+        # Store original column order for later
+        original_columns = df.columns.tolist()
 
         # Group by the specified columns and compute min and max dates for each group
         group_ranges = (
-            df.groupby(group_cols)[date_col].agg(["min", "max"]).reset_index()
+            df.groupby(group_cols, as_index=False)[date_col].agg(["min", "max"])
         )
+        
+        # Handle empty dataframe
+        if group_ranges.empty:
+            return df.copy()
 
         # Prepare to create a list of DataFrames for each group's date range
         all_dfs = []
 
-        # Create date ranges for each group more efficiently
-        for _, row in group_ranges.iterrows():
-            # Extract group values and date range
-            group_values = {col: row[col] for col in group_cols}
-            date_range = pd.date_range(start=row["min"], end=row["max"], freq=freq)
+        # Create date ranges for each group using itertuples (faster than iterrows)
+        for row in group_ranges.itertuples(index=False):
+            # Extract group values (first n columns are group_cols, then min, max)
+            group_values = {col: getattr(row, col) for col in group_cols}
+            min_date = row.min
+            max_date = row.max
+            
+            # Skip if min and max are the same and only one date exists
+            # This prevents unnecessary processing for single-date groups
+            try:
+                # Create date range - pd.date_range will align to the frequency
+                # For weekly frequencies (W-MON, W-SAT, etc.), it will start from 
+                # the first occurrence of that weekday on or after min_date
+                date_range = pd.date_range(start=min_date, end=max_date, freq=freq)
+                
+                # If date_range is empty (can happen if min_date > max_date after alignment),
+                # just use the original dates
+                if len(date_range) == 0:
+                    date_range = pd.DatetimeIndex([min_date])
+                    
+            except Exception as e:
+                # Handle edge cases where date_range fails (e.g., invalid freq)
+                print(f"Warning: Could not create date range for group {group_values}: {e}")
+                print(f"   Min date: {min_date}, Max date: {max_date}, Freq: {freq}")
+                continue
 
             # Create DataFrame with all dates for this group
             group_df = pd.DataFrame({date_col: date_range})
 
-            # Add group columns
+            # Add group columns with proper data types
             for col, val in group_values.items():
                 group_df[col] = val
 
@@ -338,9 +369,16 @@ class DataPreparation:
             completed_df = pd.concat(all_dfs, ignore_index=True)
 
             # Merge with original data efficiently
+            # Use 'left' join to keep all dates, even if no data exists
             completed_df = pd.merge(
-                completed_df, df, on=group_cols + [date_col], how="left"
+                completed_df, df, on=group_cols + [date_col], how="left", sort=False
             )
+            
+            # Restore original column order (group_cols + date_col first, then others)
+            # This ensures consistency in output
+            merge_cols = group_cols + [date_col]
+            other_cols = [col for col in original_columns if col not in merge_cols]
+            completed_df = completed_df[merge_cols + other_cols]
         else:
             # If no date ranges, return original DataFrame
             completed_df = df.copy()
@@ -521,9 +559,9 @@ class DataPreparation:
     # Add full horizon (optimized for performance)
     def add_horizon_last_cutoff(self, df, group_cols, date_col, horizon, freq="W"):
         """
-        Ensure that for each group in the latest cutoff, we have the specified horizon (e.g., 13 weeks)
+        Ensure that for each group in ALL cutoffs, we have the specified horizon (e.g., 13 weeks)
         after the cutoff date. If they don't exist, add them.
-        All other data remains unchanged. Optimized version with vectorized operations.
+        This ensures consistent test set sizes across all cutoffs for proper backtesting.
 
         Parameters:
         df (pd.DataFrame): The input DataFrame.
@@ -533,77 +571,80 @@ class DataPreparation:
         freq (str): The frequency of the dates. Default is 'W' for weekly.
 
         Returns:
-        pd.DataFrame: The updated DataFrame with any missing dates filled for the specified horizon in the latest cutoff.
+        pd.DataFrame: The updated DataFrame with any missing dates filled for the specified horizon in all cutoffs.
         """
         # Ensure the date column is in datetime format
         df[date_col] = pd.to_datetime(df[date_col])
 
-        # Identify the latest cutoff
-        latest_cutoff = df["cutoff"].max()
+        # Get all unique cutoffs
+        all_cutoffs = df["cutoff"].unique()
+        
+        # Process each cutoff separately
+        all_cutoff_dfs = []
+        
+        for cutoff in all_cutoffs:
+            # Split the dataframe for this cutoff
+            cutoff_df = df[df["cutoff"] == cutoff]
+            
+            # Only proceed if we have data for this cutoff
+            if cutoff_df.empty:
+                continue
 
-        # Split the dataframe into latest cutoff and the rest
-        latest_df = df[df["cutoff"] == latest_cutoff]
-        rest_df = df[df["cutoff"] != latest_cutoff]
+            # Get unique groups in this cutoff
+            unique_groups = cutoff_df[group_cols].drop_duplicates()
 
-        # Only proceed if we have data for the latest cutoff
-        if latest_df.empty:
-            return df
+            # Create a list to store new horizon rows for this cutoff
+            horizon_rows = []
 
-        # Get unique groups in the latest cutoff
-        unique_groups = latest_df[group_cols].drop_duplicates()
+            # Process each group individually
+            for _, group_values in unique_groups.iterrows():
+                # Create filter for this group
+                group_filter = True
+                for col, val in zip(group_cols, [group_values[col] for col in group_cols]):
+                    group_filter = group_filter & (cutoff_df[col] == val)
 
-        # Create a list to store new horizon rows
-        horizon_rows = []
+                # Get this group's data
+                group_data = cutoff_df[group_filter]
 
-        # Process each group individually (avoiding the deprecated groupby-apply)
-        for _, group_values in unique_groups.iterrows():
-            # Create filter for this group
-            group_filter = True
-            for col, val in zip(group_cols, [group_values[col] for col in group_cols]):
-                group_filter = group_filter & (latest_df[col] == val)
+                if len(group_data) > 0:
+                    # Get the cutoff date for this group
+                    cutoff_date = pd.to_datetime(group_data["cutoff"].iloc[0])
 
-            # Get this group's data
-            group_data = latest_df[group_filter]
+                    # Generate the required date range starting from the cutoff date
+                    required_dates = pd.date_range(
+                        start=cutoff_date, periods=horizon + 1, freq=freq
+                    )[1:]
 
-            if len(group_data) > 0:
-                # Get the cutoff date for this group
-                cutoff_date = pd.to_datetime(group_data["cutoff"].iloc[0])
+                    # Add each date as a new row with the group's data
+                    for date in required_dates:
+                        # Check if this date already exists for this group
+                        date_filter = group_filter & (cutoff_df[date_col] == date)
+                        if len(cutoff_df[date_filter]) == 0:  # If no matching row exists
+                            # Create a new row with this date and group values
+                            new_row = {
+                                date_col: date,
+                                "sample": "test",
+                                "cutoff": cutoff,
+                            }
 
-                # Generate the required date range starting from the cutoff date
-                required_dates = pd.date_range(
-                    start=cutoff_date, periods=horizon + 1, freq=freq
-                )[1:]
+                            # Add group column values
+                            for col in group_cols:
+                                new_row[col] = group_values[col]
 
-                # Add each date as a new row with the group's data
-                for date in required_dates:
-                    # Check if this date already exists for this group
-                    date_filter = group_filter & (latest_df[date_col] == date)
-                    # Fixed the datetime64 any() warning
-                    if len(latest_df[date_filter]) == 0:  # If no matching row exists
-                        # Create a new row with this date and group values
-                        new_row = {
-                            date_col: date,
-                            "sample": "test",
-                            "cutoff": latest_cutoff,
-                        }
+                            horizon_rows.append(new_row)
 
-                        # Add group column values
-                        for col in group_cols:
-                            new_row[col] = group_values[col]
-
-                        horizon_rows.append(new_row)
-
-        # Create DataFrame from horizon rows if we have any
-        if horizon_rows:
-            horizon_df = pd.DataFrame(horizon_rows)
-
-            # Combine with latest cutoff data
-            processed_latest = pd.concat([latest_df, horizon_df], ignore_index=True)
-
-            # Combine with the rest of the data
-            result = pd.concat([rest_df, processed_latest], ignore_index=True)
+            # Create DataFrame from horizon rows if we have any
+            if horizon_rows:
+                horizon_df = pd.DataFrame(horizon_rows)
+                # Combine with this cutoff's data
+                cutoff_df = pd.concat([cutoff_df, horizon_df], ignore_index=True)
+            
+            all_cutoff_dfs.append(cutoff_df)
+        
+        # Combine all cutoffs
+        if all_cutoff_dfs:
+            result = pd.concat(all_cutoff_dfs, ignore_index=True)
         else:
-            # If no horizon rows needed, just return the original data
             result = df.copy()
 
         # Fill forward string/object columns
