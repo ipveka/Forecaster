@@ -2,6 +2,9 @@
 __pycache__/
 *.pyc
 
+# Ignore configuration files
+config.py
+
 # Ignore Jupyter notebook checkpoints
 .ipynb_checkpoints/
 
