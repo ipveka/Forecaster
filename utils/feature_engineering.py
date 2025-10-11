@@ -247,11 +247,6 @@ class FeatureEngineering:
         print(f"   ✓ Created 'train_weight' column (type: linear)")
         print(f"      - Gives more importance to recent observations")
 
-        # Add horizon numbers
-        print(f"\n🔢 Creating horizon numbers...")
-        df = self.create_horizon_number(df, group_cols, date_col)
-        print(f"   ✓ Created 'horizon' column")
-        print(f"      - Tracks forecast horizon position")
 
         # Final summary
         final_cols = len(df.columns)
@@ -1470,81 +1465,3 @@ class FeatureEngineering:
             df_copy.loc[group_mask, "train_weight"] = weights
 
         return df_copy
-
-    # Create horizon number
-    def create_horizon_number(
-        self,
-        df,
-        group_columns,
-        date_col="date",
-        sample_col="sample",
-        target_sample="test",
-    ):
-        """
-        Adds a column `horizon` to the DataFrame that counts rows from 1 for each occurrence of `sample = target_sample`
-        within groups defined by `group_columns`. The count starts from the first occurrence of `sample = target_sample` in
-        each group, and all prior rows are set to NaN.
-
-        Parameters:
-        -----------
-        df : pd.DataFrame
-            The DataFrame containing data to process.
-        group_columns : list
-            Columns to group by, e.g., ['client', 'warehouse', 'product', 'cutoff'].
-        date_col : str, optional
-            Column to order rows by within each group. Default is 'date'.
-        sample_col : str, optional
-            Column that identifies the target sample, e.g., 'sample'.
-        target_sample : str, optional
-            Value within `sample_col` to start counting from. Default is 'test'.
-
-        Returns:
-        --------
-        pd.DataFrame
-            The DataFrame with an added `horizon` column as integer.
-        """
-        # Ensure group_columns is a list
-        if isinstance(group_columns, str):
-            group_columns = [group_columns]
-        elif not isinstance(group_columns, list):
-            raise ValueError("group_columns must be a list or a string.")
-
-        # Sort DataFrame by group columns and date
-        df = df.sort_values(by=group_columns + [date_col]).copy()
-
-        # Auxiliary horizon function
-        def apply_horizon(group):
-            start_index = group.index[group[sample_col] == target_sample]
-            if len(start_index) == 0:
-                group["horizon"] = np.nan
-            else:
-                first_test_index = start_index[0]
-                # Use range with integers for horizon
-                group.loc[first_test_index:, "horizon"] = range(
-                    1, len(group.loc[first_test_index:]) + 1
-                )
-                if first_test_index > group.index[0]:
-                    group.loc[: first_test_index - 1, "horizon"] = np.nan
-            return group
-
-        # Initialize horizon column with NaN
-        df["horizon"] = np.nan
-
-        # Process each group separately instead of using groupby.apply
-        for group_name, group_df in df.groupby(group_columns):
-            # Get indices of this group
-            group_indices = group_df.index
-
-            # Find start index for target_sample
-            start_indices = group_df.index[group_df[sample_col] == target_sample]
-
-            if len(start_indices) > 0:
-                first_test_index = start_indices[0]
-                # Calculate horizon numbers for this group
-                test_indices = group_df.loc[first_test_index:].index
-                df.loc[test_indices, "horizon"] = range(1, len(test_indices) + 1)
-
-        # Cast to integer after filling NaN
-        df["horizon"] = df["horizon"].fillna(0).astype(int)
-
-        return df
