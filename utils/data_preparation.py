@@ -41,6 +41,7 @@ class DataPreparation:
         complete_dataframe=True,
         smoothing=True,
         dp_window_size=None,
+        cutoff_frequency="monthly",
         n_cutoffs=1,
     ):
         """
@@ -56,6 +57,7 @@ class DataPreparation:
         complete_dataframe (bool): Whether to use complete_dataframe function
         smoothing (bool): Whether to smooth signals or not
         dp_window_size (int, optional): Window size for smoothing. If None, it will be determined by frequency.
+        cutoff_frequency (str): Frequency for cutoff dates. Options: 'weekly', 'bi-weekly', 'monthly' (default), 'quarterly'
         n_cutoffs (int): Number of cutoffs for backtesting
 
         Returns:
@@ -151,7 +153,8 @@ class DataPreparation:
 
         # Get last cutoffs
         print(f"\n📅 Creating {n_cutoffs} cutoff(s) for backtesting...")
-        cutoff_dates = self.get_first_dates_last_n_months(df, date_col, target, n_cutoffs)
+        print(f"   • Cutoff frequency: {cutoff_frequency}")
+        cutoff_dates = self.get_cutoff_dates(df, date_col, target, cutoff_frequency, n_cutoffs)
         print(f"   ✓ Cutoff dates (based on dates with valid target):")
         for i, cutoff_date in enumerate(cutoff_dates, 1):
             cutoff_label = " [LATEST - Used for future forecasting]" if i == 1 else ""
@@ -466,23 +469,27 @@ class DataPreparation:
 
         return latest_dates
 
-    # Latest month first weeks
-    def get_first_dates_last_n_months(self, df, date_col, target, n_cutoffs):
+    # Get cutoff dates with configurable frequency
+    def get_cutoff_dates(self, df, date_col, target, cutoff_frequency="monthly", n_cutoffs=1):
         """
-        Get cutoff dates for backtesting, ensuring the latest valid date is always included.
-        For n_cutoffs > 1, also includes the first date of previous months.
+        Get cutoff dates for backtesting with configurable frequency.
+        Always includes the latest valid date first, then adds previous cutoffs based on frequency.
         All dates are filtered to only include dates where target is > 0 and not NaN.
 
         Parameters:
         df (pd.DataFrame): The input DataFrame.
         date_col (str): The name of the date column.
         target (str): The name of the target column.
+        cutoff_frequency (str): Frequency for cutoff dates. Options:
+            - 'weekly': One cutoff per week
+            - 'bi-weekly': One cutoff every two weeks
+            - 'monthly': One cutoff per month (default)
+            - 'quarterly': One cutoff per quarter
         n_cutoffs (int): The number of cutoffs to retrieve.
 
         Returns:
         list: A list containing cutoff dates, with the latest valid date always first.
         """
-
         # Ensure the date column is in datetime format
         df[date_col] = pd.to_datetime(df[date_col])
 
@@ -496,24 +503,68 @@ class DataPreparation:
         latest_date = valid_target_df[date_col].max()
         cutoff_dates = [latest_date]
         
-        # If we need more cutoffs, get first dates from previous months
+        # If we need more cutoffs, generate them based on frequency
         if n_cutoffs > 1:
-            # Group by year and month, then get the first date for each month
-            first_dates_per_month = valid_target_df.groupby(valid_target_df[date_col].dt.to_period("M"))[
-                date_col
-            ].min()
+            # Get all valid dates sorted in descending order
+            all_valid_dates = valid_target_df[date_col].drop_duplicates().sort_values(ascending=False)
             
-            # Get the latest n-1 months (excluding the current month if latest_date is already included)
-            # Sort in descending order and take enough to fill n_cutoffs
-            sorted_first_dates = first_dates_per_month.sort_index(ascending=False)
-            
-            for first_date in sorted_first_dates:
-                # Skip if this date is the same as latest_date (avoid duplicates)
-                if first_date != latest_date and len(cutoff_dates) < n_cutoffs:
-                    cutoff_dates.append(first_date)
-                    
-                if len(cutoff_dates) >= n_cutoffs:
-                    break
+            if cutoff_frequency == "weekly":
+                # Get one cutoff per week (approximately 7 days apart)
+                for date in all_valid_dates:
+                    if date == latest_date:
+                        continue
+                    # Check if this date is at least 7 days before the last added cutoff
+                    if (cutoff_dates[-1] - date).days >= 7:
+                        cutoff_dates.append(date)
+                        if len(cutoff_dates) >= n_cutoffs:
+                            break
+                            
+            elif cutoff_frequency == "bi-weekly":
+                # Get one cutoff every two weeks (approximately 14 days apart)
+                for date in all_valid_dates:
+                    if date == latest_date:
+                        continue
+                    # Check if this date is at least 14 days before the last added cutoff
+                    if (cutoff_dates[-1] - date).days >= 14:
+                        cutoff_dates.append(date)
+                        if len(cutoff_dates) >= n_cutoffs:
+                            break
+                            
+            elif cutoff_frequency == "monthly":
+                # Get first date of each previous month
+                first_dates_per_month = valid_target_df.groupby(
+                    valid_target_df[date_col].dt.to_period("M")
+                )[date_col].min()
+                
+                # Sort in descending order
+                sorted_first_dates = first_dates_per_month.sort_index(ascending=False)
+                
+                for first_date in sorted_first_dates:
+                    # Skip if this date is the same as latest_date (avoid duplicates)
+                    if first_date != latest_date and len(cutoff_dates) < n_cutoffs:
+                        cutoff_dates.append(first_date)
+                        
+                    if len(cutoff_dates) >= n_cutoffs:
+                        break
+                        
+            elif cutoff_frequency == "quarterly":
+                # Get first date of each previous quarter
+                first_dates_per_quarter = valid_target_df.groupby(
+                    valid_target_df[date_col].dt.to_period("Q")
+                )[date_col].min()
+                
+                # Sort in descending order
+                sorted_first_dates = first_dates_per_quarter.sort_index(ascending=False)
+                
+                for first_date in sorted_first_dates:
+                    # Skip if this date is the same as latest_date (avoid duplicates)
+                    if first_date != latest_date and len(cutoff_dates) < n_cutoffs:
+                        cutoff_dates.append(first_date)
+                        
+                    if len(cutoff_dates) >= n_cutoffs:
+                        break
+            else:
+                raise ValueError(f"Invalid cutoff_frequency: '{cutoff_frequency}'. Must be 'weekly', 'bi-weekly', 'monthly', or 'quarterly'.")
 
         return cutoff_dates
 
