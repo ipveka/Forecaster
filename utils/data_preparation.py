@@ -181,6 +181,15 @@ class DataPreparation:
             print(f"   ✓ Added {rows_added:,} rows for {horizon}-period forecast horizon across all cutoffs")
         else:
             print(f"   ✓ Horizon already complete (no rows added)")
+        
+        # Show first test date for latest cutoff (after horizon is added)
+        latest_cutoff = cutoff_dates[0]  # First cutoff is the latest
+        latest_cutoff_df = df[df["cutoff"] == latest_cutoff]
+        first_test_date = latest_cutoff_df[latest_cutoff_df["sample"] == "test"][date_col].min()
+        if pd.notna(first_test_date):
+            print(f"   ✓ First test date (latest cutoff): {pd.to_datetime(first_test_date).date()}")
+        else:
+            print(f"   ⚠️  No test data found for latest cutoff")
 
         # Final formatting
         print(f"\n🔧 Final formatting...")
@@ -599,10 +608,11 @@ class DataPreparation:
 
         # Set the 'sample' column based on date comparison with cutoff
         # Using numpy for vectorized operations instead of apply
+        # Test period starts AFTER the cutoff date (not including the cutoff date itself)
         combined["sample"] = np.where(
             combined[date_col] > combined["cutoff"],
             "test",
-            np.where(combined[date_col] == combined["cutoff"], "test", "train"),
+            "train",  # cutoff date and earlier dates are training data
         )
 
         return combined

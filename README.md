@@ -60,7 +60,33 @@ python src/run_forecaster.py --freq W --horizon 12 --n_cutoffs 3 --model LGBM
 
 ---
 
-## 🔧 Configuration
+## 📋 Data Structure & Backtesting
+
+The framework uses a sophisticated backtesting approach with **cutoffs** to create robust train/test splits:
+
+### **Cutoffs**
+- **Cutoff Date**: The last date with available data (e.g., `2024-04-08`)
+- **Purpose**: Defines the boundary between training and test periods
+- **Multiple Cutoffs**: Creates several cutoffs for comprehensive backtesting
+
+### **Train/Test Split Logic**
+```
+Training Data:  [earliest_date] ... [cutoff_date]     ← Includes cutoff date
+Test Data:      [cutoff_date + 1] ... [cutoff_date + horizon]  ← Starts day after cutoff
+```
+
+### **Example Timeline**
+If your data goes up to `2024-04-08`:
+- **Cutoff**: `2024-04-08` (last available data)
+- **Training**: `[start] ... [2024-04-08]` 
+- **Test**: `[2024-04-09] ... [2024-04-09 + horizon]`
+
+### **Backtesting Benefits**
+- **Realistic Validation**: Tests on future data, not historical
+- **Multiple Scenarios**: Different cutoff dates test model robustness
+- **Production-Ready**: Mimics real-world forecasting conditions
+
+---
 
 The framework automatically selects optimal parameters based on data frequency:
 
