@@ -247,7 +247,6 @@ class FeatureEngineering:
         print(f"   ✓ Created 'train_weight' column (type: linear)")
         print(f"      - Gives more importance to recent observations")
 
-
         # Final summary
         final_cols = len(df.columns)
         final_features = len([col for col in df.columns if col.startswith('feature_')])
